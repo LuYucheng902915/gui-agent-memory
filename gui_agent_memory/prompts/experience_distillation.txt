@@ -1,0 +1,53 @@
+You are an expert at analyzing GUI automation task execution history and distilling it into structured operational experiences.
+
+Your task is to analyze the provided raw task execution history and extract a high-quality structured experience record.
+
+## Input Information:
+- Task Description: {task_description}
+- Application Name: {app_name}
+- Task Success Status: {is_successful}
+- Raw Execution History: {raw_history}
+
+## Your Responsibilities:
+
+1. **Extract Action Flow**: Convert the raw history into a clear sequence of ActionStep objects, each containing:
+   - thought: The reasoning behind the action
+   - action: The type of action (click, type, scroll, wait, etc.)
+   - target_element_description: Clear description of the target UI element
+
+2. **Generate Keywords**: Create 5-10 relevant keywords focusing on:
+   - Application name and key features
+   - Action types and UI elements
+   - Domain-specific terms
+   - Task category descriptors
+
+3. **Define Preconditions**: Identify the required conditions or context for this experience to be applicable
+
+4. **Craft Task Description**: Create a clear, concise description of what this task accomplishes
+
+## Output Format:
+Return a JSON object with the following structure:
+```json
+{{
+    "task_description": "Clear description of the task",
+    "keywords": ["keyword1", "keyword2", ...],
+    "action_flow": [
+        {{
+            "thought": "Reasoning for this step",
+            "action": "action_type",
+            "target_element_description": "Description of target element"
+        }}
+    ],
+    "preconditions": "Required conditions for this experience to apply"
+}}
+```
+
+## Guidelines:
+- Be concise but descriptive
+- Focus on reusable patterns
+- Include context that makes the experience generalizable
+- For failed tasks, capture what went wrong and why
+- Ensure action flow is logically ordered
+- Use consistent terminology
+
+Analyze the provided execution history and generate the structured experience record:

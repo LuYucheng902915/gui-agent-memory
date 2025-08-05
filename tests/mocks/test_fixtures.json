@@ -1,0 +1,112 @@
+{
+  "sample_experience_record": {
+    "task_description": "Log into Gmail using Chrome browser",
+    "keywords": ["gmail", "login", "chrome", "browser", "email"],
+    "action_flow": [
+      {
+        "thought": "Need to navigate to Gmail login page",
+        "action": "navigate",
+        "target_element_description": "Chrome address bar"
+      },
+      {
+        "thought": "Enter email address for authentication",  
+        "action": "type",
+        "target_element_description": "Email input field"
+      },
+      {
+        "thought": "Submit login credentials",
+        "action": "click", 
+        "target_element_description": "Sign in button"
+      }
+    ],
+    "preconditions": "Chrome browser is installed and running",
+    "is_successful": true,
+    "usage_count": 0,
+    "source_task_id": "test_task_001"
+  },
+  "sample_fact_record": {
+    "content": "Gmail supports two-factor authentication for enhanced security",
+    "keywords": ["gmail", "2fa", "security", "authentication"],
+    "source": "documentation",
+    "usage_count": 0
+  },
+  "sample_raw_history": [
+    {
+      "timestamp": "2024-01-01T10:00:00Z",
+      "action": "navigate",
+      "target": "https://gmail.com",
+      "success": true
+    },
+    {
+      "timestamp": "2024-01-01T10:00:05Z", 
+      "action": "click",
+      "target": "email_input",
+      "success": true
+    },
+    {
+      "timestamp": "2024-01-01T10:00:10Z",
+      "action": "type", 
+      "target": "email_input",
+      "text": "user@example.com",
+      "success": true
+    },
+    {
+      "timestamp": "2024-01-01T10:00:15Z",
+      "action": "click",
+      "target": "next_button", 
+      "success": true
+    },
+    {
+      "timestamp": "2024-01-01T10:00:20Z",
+      "action": "type",
+      "target": "password_input",
+      "text": "********",
+      "success": true
+    },
+    {
+      "timestamp": "2024-01-01T10:00:25Z",
+      "action": "click",
+      "target": "signin_button",
+      "success": true
+    }
+  ],
+  "sample_learning_request": {
+    "raw_history": [
+      {
+        "action": "click",
+        "target": "login_button",
+        "thought": "need to login first"
+      },
+      {
+        "action": "type", 
+        "target": "email_field",
+        "text": "user@example.com"
+      }
+    ],
+    "is_successful": true,
+    "source_task_id": "test_learning_001",
+    "app_name": "Gmail",
+    "task_description": "Login to Gmail account"
+  },
+  "sample_retrieval_result": {
+    "experiences": [
+      {
+        "task_description": "Log into Gmail using Chrome browser",
+        "keywords": ["gmail", "login", "chrome"],
+        "action_flow": [],
+        "preconditions": "Browser is open",
+        "is_successful": true,
+        "source_task_id": "test_001"
+      }
+    ],
+    "facts": [
+      {
+        "content": "Gmail requires valid credentials for login",
+        "keywords": ["gmail", "login", "credentials"],
+        "source": "manual"
+      }
+    ],
+    "query": "How to login to Gmail",
+    "total_results": 2
+  }
+}

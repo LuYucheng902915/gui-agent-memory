@@ -1,0 +1,87 @@
+{
+  "embedding_response": {
+    "object": "list",
+    "data": [
+      {
+        "object": "embedding",
+        "embedding": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        "index": 0
+      }
+    ],
+    "model": "Qwen3-Embedding-8B",
+    "usage": {
+      "prompt_tokens": 10,
+      "total_tokens": 10
+    }
+  },
+  "experience_distillation_response": {
+    "id": "chatcmpl-test",
+    "object": "chat.completion",
+    "created": 1699999999,
+    "model": "gpt-4o",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\n  \"task_description\": \"Log into Gmail using Chrome browser\",\n  \"keywords\": [\"gmail\", \"login\", \"chrome\", \"browser\", \"email\", \"authentication\"],\n  \"action_flow\": [\n    {\n      \"thought\": \"Need to navigate to Gmail login page\",\n      \"action\": \"navigate\",\n      \"target_element_description\": \"Chrome address bar\"\n    },\n    {\n      \"thought\": \"Enter email address for authentication\",\n      \"action\": \"type\",\n      \"target_element_description\": \"Email input field\"\n    },\n    {\n      \"thought\": \"Proceed to password entry\",\n      \"action\": \"click\",\n      \"target_element_description\": \"Next button\"\n    },\n    {\n      \"thought\": \"Enter password to complete login\",\n      \"action\": \"type\",\n      \"target_element_description\": \"Password input field\"\n    },\n    {\n      \"thought\": \"Submit login credentials\",\n      \"action\": \"click\",\n      \"target_element_description\": \"Sign in button\"\n    }\n  ],\n  \"preconditions\": \"Chrome browser is installed and running, valid Gmail credentials are available\"\n}"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 100,
+      "completion_tokens": 200,
+      "total_tokens": 300
+    }
+  },
+  "keyword_extraction_response": {
+    "id": "chatcmpl-keywords",
+    "object": "chat.completion",
+    "created": 1699999999,
+    "model": "gpt-4o",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "[\"gmail\", \"login\", \"chrome\", \"browser\", \"email\"]"
+        },
+        "finish_reason": "stop"
+      }
+    ]
+  },
+  "reranker_response": {
+    "id": "chatcmpl-rerank",
+    "object": "chat.completion",
+    "created": 1699999999,
+    "model": "Qwen3-Reranker-8B",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "[0, 2, 1, 3]"
+        },
+        "finish_reason": "stop"
+      }
+    ]
+  },
+  "models_list_response": {
+    "object": "list",
+    "data": [
+      {
+        "id": "Qwen3-Embedding-8B",
+        "object": "model",
+        "created": 1699999999,
+        "owned_by": "gitee-ai"
+      },
+      {
+        "id": "Qwen3-Reranker-8B",
+        "object": "model",
+        "created": 1699999999,
+        "owned_by": "gitee-ai"
+      }
+    ]
+  }
+}

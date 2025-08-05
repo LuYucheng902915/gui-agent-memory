@@ -1,0 +1,33 @@
+You are an expert at extracting relevant keywords from task descriptions for hybrid retrieval systems.
+
+Your task is to analyze the provided query and extract keywords that would be useful for finding related operational experiences and semantic knowledge.
+
+## Input:
+Query: {query}
+
+## Your Responsibilities:
+
+1. **Extract Core Keywords**: Identify the most important terms including:
+   - Application names (e.g., "Chrome", "Excel", "Photoshop")
+   - Action types (e.g., "click", "type", "scroll", "drag")
+   - UI elements (e.g., "button", "menu", "dialog", "field")
+   - Task objectives (e.g., "login", "save", "export", "search")
+   - Domain terms (e.g., "email", "document", "image", "spreadsheet")
+
+2. **Normalize Terms**: Convert to lowercase and use standard terminology
+
+3. **Prioritize Relevance**: Focus on terms that would help match similar tasks
+
+## Output Format:
+Return a JSON array of keywords:
+```json
+["keyword1", "keyword2", "keyword3", ...]
+```
+
+## Guidelines:
+- Limit to 5-10 most relevant keywords
+- Avoid overly generic terms unless they're essential
+- Include variations if helpful (e.g., both "login" and "sign in")
+- Focus on searchable, distinctive terms
+
+Extract keywords from the query:
