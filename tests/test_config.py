@@ -23,22 +23,19 @@ class TestMemoryConfig:
         with patch("gui_agent_memory.config.OpenAI", return_value=mock_openai_client):
             config = MemoryConfig()
 
-            # Test with real environment values
-            assert config.gitee_ai_embedding_base_url == "https://ai.gitee.com/v1"
+            # Test with FAKE test environment values - NOT real API keys!
             assert (
-                config.gitee_ai_embedding_api_key
-                == "IO44Z7ZON8LTRAYVMXF7A20NIRNDLRNQR2W6XX1U"
+                config.gitee_ai_embedding_base_url
+                == "https://test-embedding.example.com/v1"
             )
-            assert config.gitee_ai_reranker_base_url == "https://ai.gitee.com/v1/rerank"
+            assert config.gitee_ai_embedding_api_key == "test-fake-embedding-key-12345"
             assert (
-                config.gitee_ai_reranker_api_key
-                == "IO44Z7ZON8LTRAYVMXF7A20NIRNDLRNQR2W6XX1U"
+                config.gitee_ai_reranker_base_url
+                == "https://test-reranker.example.com/v1/rerank"
             )
-            assert config.experience_llm_base_url == "https://poloai.top/v1"
-            assert (
-                config.experience_llm_api_key
-                == "sk-icEwgvQl5Jmb42Ec8aHVnmLNG7kEUyIa6TDToilFxXSOxkeW"
-            )
+            assert config.gitee_ai_reranker_api_key == "test-fake-reranker-key-67890"
+            assert config.experience_llm_base_url == "https://test-llm.example.com/v1"
+            assert config.experience_llm_api_key == "test-fake-llm-key-abcdef"
             assert config.embedding_model == "Qwen3-Embedding-8B"
             assert config.reranker_model == "Qwen3-Reranker-8B"
 

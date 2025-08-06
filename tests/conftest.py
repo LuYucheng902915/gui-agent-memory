@@ -20,19 +20,17 @@ from unittest.mock import Mock
 
 import pytest
 
-# Set up environment variables for all tests
-os.environ.setdefault("GITEE_AI_EMBEDDING_BASE_URL", "https://ai.gitee.com/v1")
+# Set up FAKE environment variables for all tests - DO NOT USE REAL API KEYS!
 os.environ.setdefault(
-    "GITEE_AI_EMBEDDING_API_KEY", "IO44Z7ZON8LTRAYVMXF7A20NIRNDLRNQR2W6XX1U"
+    "GITEE_AI_EMBEDDING_BASE_URL", "https://test-embedding.example.com/v1"
 )
-os.environ.setdefault("GITEE_AI_RERANKER_BASE_URL", "https://ai.gitee.com/v1/rerank")
+os.environ.setdefault("GITEE_AI_EMBEDDING_API_KEY", "test-fake-embedding-key-12345")
 os.environ.setdefault(
-    "GITEE_AI_RERANKER_API_KEY", "IO44Z7ZON8LTRAYVMXF7A20NIRNDLRNQR2W6XX1U"
+    "GITEE_AI_RERANKER_BASE_URL", "https://test-reranker.example.com/v1/rerank"
 )
-os.environ.setdefault("EXPERIENCE_LLM_BASE_URL", "https://poloai.top/v1")
-os.environ.setdefault(
-    "EXPERIENCE_LLM_API_KEY", "sk-icEwgvQl5Jmb42Ec8aHVnmLNG7kEUyIa6TDToilFxXSOxkeW"
-)
+os.environ.setdefault("GITEE_AI_RERANKER_API_KEY", "test-fake-reranker-key-67890")
+os.environ.setdefault("EXPERIENCE_LLM_BASE_URL", "https://test-llm.example.com/v1")
+os.environ.setdefault("EXPERIENCE_LLM_API_KEY", "test-fake-llm-key-abcdef")
 
 
 @pytest.fixture
@@ -322,13 +320,17 @@ class TestEnvironment:
 
     @staticmethod
     def setup_test_env():
-        """Setup test environment variables."""
-        os.environ["GITEE_AI_EMBEDDING_BASE_URL"] = "https://test-ai.example.com/v1"
-        os.environ["GITEE_AI_EMBEDDING_API_KEY"] = "test_gitee_key"
-        os.environ["GITEE_AI_RERANKER_BASE_URL"] = "https://ai.gitee.com/v1/rerank"
-        os.environ["GITEE_AI_RERANKER_API_KEY"] = "test_gitee_key"
+        """Setup FAKE test environment variables - DO NOT USE REAL API KEYS!"""
+        os.environ["GITEE_AI_EMBEDDING_BASE_URL"] = (
+            "https://test-embedding.example.com/v1"
+        )
+        os.environ["GITEE_AI_EMBEDDING_API_KEY"] = "test-fake-embedding-key-12345"
+        os.environ["GITEE_AI_RERANKER_BASE_URL"] = (
+            "https://test-reranker.example.com/v1/rerank"
+        )
+        os.environ["GITEE_AI_RERANKER_API_KEY"] = "test-fake-reranker-key-67890"
         os.environ["EXPERIENCE_LLM_BASE_URL"] = "https://test-llm.example.com/v1"
-        os.environ["EXPERIENCE_LLM_API_KEY"] = "test_llm_key"
+        os.environ["EXPERIENCE_LLM_API_KEY"] = "test-fake-llm-key-abcdef"
         os.environ["CHROMA_DB_PATH"] = "./test_data/chroma"
 
     @staticmethod
