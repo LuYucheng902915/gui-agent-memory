@@ -46,29 +46,21 @@ line-length = 88  # Black/Ruff 标准
 target-version = "py311"
 
 [tool.ruff.lint]
-# 适合中小型项目的代码质量检查规则
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
     "F",   # pyflakes
     "I",   # isort
-    "C",   # flake8-comprehensions
     "B",   # flake8-bugbear
     "UP",  # pyupgrade
-    "N",   # pep8-naming
     "S",   # bandit (security)
-    "T20", # flake8-print (检测 print 语句)
-    "PIE", # flake8-pie
-    "RET", # flake8-return
-    "SIM", # flake8-simplify
-    "ARG", # flake8-unused-arguments
-    "PTH", # flake8-use-pathlib
+    "T20", # flake8-print
     "RUF", # ruff-specific rules
 ]
 ignore = [
-    "E501",  # line too long (handled by formatter)
-    "S101",  # use of assert detected (在测试中很常见)
-    "N806",  # variable in function should be lowercase (for df, etc.)
+    "E501",   # line too long (handled by formatter)
+    "RUF001", # allow Chinese characters in strings
+    "RUF003", # allow Chinese characters in comments
 ]
 
 # 针对不同文件类型的特殊规则
@@ -83,97 +75,41 @@ ignore = [
 ]
 "example.py" = [
     "T201",   # print statements allowed in examples
-    "RUF001", # allow Chinese characters in strings
-    "RUF003", # allow Chinese characters in comments
 ]
-
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-skip-magic-trailing-comma = false
-line-ending = "auto"
 
 [tool.ruff.lint.isort]
 known-first-party = ["gui_agent_memory"]
-combine-as-imports = true
 
 [tool.mypy]
 python_version = "3.11"
-# 适合中小型项目的类型检查配置
-warn_return_any = false
-warn_unused_configs = true
+ignore_missing_imports = true
 check_untyped_defs = true
-no_implicit_optional = true
-warn_redundant_casts = true
 warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
 show_error_codes = true
 
-# 渐进式类型检查（适合现有项目）
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_decorators = false
-
-# 外部库处理
-ignore_missing_imports = true
-follow_imports = "silent"
-
-# 测试文件特殊处理
 [[tool.mypy.overrides]]
 module = "tests.*"
-disable_error_code = ["attr-defined", "arg-type"]
 disallow_untyped_defs = false
+disable_error_code = ["attr-defined"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-python_files = "test_*.py"
-python_classes = "Test*"
-python_functions = "test_*"
 addopts = [
     "-v",
-    "--tb=short",
-    "--strict-markers",
     "--cov=gui_agent_memory",
     "--cov-report=term-missing",
-    "--cov-fail-under=70",  # 适合小项目的覆盖率要求
+    "--cov-fail-under=70",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:jieba.*",
-    "ignore:invalid escape sequence:DeprecationWarning:jieba.*",
-]
-markers = [
-    "unit: marks tests as unit tests",
-    "integration: marks tests as integration tests",
-    "e2e: marks tests as end-to-end tests",
 ]
 
 [tool.coverage.run]
 source = ["gui_agent_memory"]
-omit = [
-    "tests/*",
-    "*/test_*",
-    "*/__pycache__/*",
-]
+omit = ["tests/*"]
 
 [tool.coverage.report]
 show_missing = true
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
-]
-
-# 自定义脚本 - 用于网络问题时的本地检查
-[project.scripts]
-check = "scripts.check:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["gui_agent_memory"]

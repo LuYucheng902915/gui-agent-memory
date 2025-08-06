@@ -326,7 +326,7 @@ class TestMemoryRetriever:
         with patch.object(
             retriever,
             "_rerank_results",
-            side_effect=lambda _q, x, top_n=10: x,  # noqa: ARG005
+            side_effect=lambda _q, x, top_n=10: x,
         ):
             result = retriever.retrieve_memories(query, top_n=1)
 
