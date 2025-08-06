@@ -61,14 +61,14 @@ def mock_config():
     config.embedding_client = (
         config.gitee_ai_client
     )  # Add direct reference for test compatibility
+
+    # Add reranker configuration attributes
+    config.gitee_ai_reranker_base_url = "https://ai.gitee.com/v1/rerank"
+    config.gitee_ai_reranker_api_key = "test_gitee_key"
+    config.reranker_model = "test-reranker-model"
+
     config.get_embedding_client = Mock(return_value=config.gitee_ai_client)
-    config.get_reranker_config = Mock(
-        return_value={
-            "base_url": "https://ai.gitee.com/v1/rerank",
-            "api_key": "test_gitee_key",
-            "model": "test-reranker-model",
-        }
-    )
+    config.get_reranker_client = Mock(return_value=config.gitee_ai_client)
     config.get_experience_llm_client = Mock(return_value=config.experience_llm_client)
     config.validate_configuration = Mock(return_value=True)
 

@@ -345,3 +345,47 @@ class MemoryStorage:
             self._init_collections()
         except Exception as e:
             raise StorageError(f"Failed to clear collections: {e}") from e
+
+    def update_usage_stats(self, record_ids: list[str], collection_name: str) -> None:
+        """
+        Update usage statistics for retrieved records.
+
+        Args:
+            record_ids: List of record IDs to update
+            collection_name: Name of the collection containing the records
+
+        Raises:
+            StorageError: If update operation fails
+        """
+        try:
+            from datetime import datetime
+
+            collection = self.get_collection(collection_name)
+
+            # Get current timestamp
+            current_time = datetime.now().isoformat()
+
+            # Update each record's usage stats
+            for record_id in record_ids:
+                # Get current metadata
+                result = collection.get(ids=[record_id], include=["metadatas"])
+                if not result["metadatas"]:
+                    continue
+
+                metadata = (
+                    dict(result["metadatas"][0]) if result["metadatas"][0] else {}
+                )
+
+                # Increment usage_count and update last_used_at
+                current_count = metadata.get("usage_count", 0)
+                if isinstance(current_count, int | float):
+                    metadata["usage_count"] = int(current_count) + 1
+                else:
+                    metadata["usage_count"] = 1
+                metadata["last_used_at"] = current_time
+
+                # Update the record
+                collection.update(ids=[record_id], metadatas=[metadata])
+
+        except Exception as e:
+            raise StorageError(f"Failed to update usage stats: {e}") from e

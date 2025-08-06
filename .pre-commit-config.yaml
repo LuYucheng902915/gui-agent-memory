@@ -10,7 +10,7 @@ repos:
       - id: debug-statements
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9  # Align with pyproject.toml minimum version
+    rev: v0.12.7
     hooks:
       # Code linting and fixing
       - id: ruff
@@ -19,10 +19,10 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0  # Align with pyproject.toml minimum version
+    rev: v1.17.1  # Align with pyproject.toml minimum version
     hooks:
       - id: mypy
         additional_dependencies: [
-          types-requests>=2.31.0,  # Align with pyproject.toml version
+          types-requests>=2.32.4.20250611,  # Align with actual installed version
         ]
         args: [--no-warn-unused-ignores]

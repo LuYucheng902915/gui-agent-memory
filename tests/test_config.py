@@ -123,14 +123,11 @@ class TestMemoryConfig:
             config = MemoryConfig()
 
             embedding_client = config.get_embedding_client()
-            reranker_config = config.get_reranker_config()
+            reranker_client = config.get_reranker_client()
             llm_client = config.get_experience_llm_client()
 
             assert embedding_client is not None
-            assert reranker_config is not None
-            assert "base_url" in reranker_config
-            assert "api_key" in reranker_config
-            assert "model" in reranker_config
+            assert reranker_client is not None
             assert llm_client is not None
 
     def test_validate_configuration_success(self, mock_openai_client):

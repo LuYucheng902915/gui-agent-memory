@@ -105,6 +105,12 @@ class MemoryConfig:
                 base_url=self.gitee_ai_embedding_base_url,
             )
 
+            # Initialize Gitee AI client for reranker (separate endpoint)
+            self.gitee_ai_reranker_client = OpenAI(
+                api_key=self.gitee_ai_reranker_api_key,
+                base_url=self.gitee_ai_reranker_base_url,
+            )
+
             # Initialize Experience LLM client
             self.experience_llm_client = OpenAI(
                 api_key=self.experience_llm_api_key,
@@ -120,13 +126,9 @@ class MemoryConfig:
         """Get the embedding client (Gitee AI)."""
         return self.gitee_ai_embedding_client
 
-    def get_reranker_config(self) -> dict:
-        """Get the reranker configuration (separate endpoint)."""
-        return {
-            "base_url": self.gitee_ai_reranker_base_url,
-            "api_key": self.gitee_ai_reranker_api_key,
-            "model": self.reranker_model,
-        }
+    def get_reranker_client(self) -> OpenAI:
+        """Get the reranker client (Gitee AI)."""
+        return self.gitee_ai_reranker_client
 
     def get_experience_llm_client(self) -> OpenAI:
         """Get the experience distillation LLM client."""
@@ -145,6 +147,9 @@ class MemoryConfig:
         try:
             # Test embedding client
             self.gitee_ai_embedding_client.models.list()
+
+            # Test reranker client
+            self.gitee_ai_reranker_client.models.list()
 
             # Test experience LLM client
             self.experience_llm_client.models.list()

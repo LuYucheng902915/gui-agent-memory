@@ -380,15 +380,13 @@ class MemoryRetriever:
         candidates = candidates[:20]
 
         try:
-            reranker_config = self.config.get_reranker_config()
-
             # Prepare documents for reranking
             documents = [result["document"] for result in candidates]
 
             # Prepare headers for the request
             headers = {
                 "X-Failover-Enabled": "true",
-                "Authorization": f"Bearer {reranker_config['api_key']}",
+                "Authorization": f"Bearer {self.config.gitee_ai_reranker_api_key}",
                 "Content-Type": "application/json",
             }
 
@@ -396,12 +394,15 @@ class MemoryRetriever:
             payload = {
                 "query": query,
                 "documents": documents,
-                "model": reranker_config["model"],
+                "model": self.config.reranker_model,
             }
 
             # Call reranker API
             response = requests.post(
-                reranker_config["base_url"], headers=headers, json=payload, timeout=30
+                self.config.gitee_ai_reranker_base_url,
+                headers=headers,
+                json=payload,
+                timeout=30,
             )
             response.raise_for_status()
 
@@ -497,16 +498,127 @@ class MemoryRetriever:
 
         return experiences, facts
 
-    def retrieve_memories(
-        self, query: str, top_n: int = 3, top_k: int = 20
-    ) -> RetrievalResult:
+    def _update_experience_usage(
+        self, reranked_experiences: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Update usage statistics for experience results."""
+        if not reranked_experiences:
+            return reranked_experiences
+
+        from datetime import datetime
+
+        current_time = datetime.now()
+
+        experience_ids = []
+        for result in reranked_experiences:
+            if result.get("type") == "experience":
+                experience_ids.append(result["metadata"]["source_task_id"])
+
+        if experience_ids:
+            self.storage.update_usage_stats(
+                experience_ids, self.config.experiential_collection_name
+            )
+
+            # Update the metadata in results to reflect new usage stats
+            for result in reranked_experiences:
+                if result.get("type") == "experience":
+                    current_count = result["metadata"].get("usage_count", 0)
+                    result["metadata"]["usage_count"] = current_count + 1
+                    result["metadata"]["last_used_at"] = current_time.isoformat()
+
+        return reranked_experiences
+
+    def _update_fact_usage(
+        self, reranked_facts: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Update usage statistics for fact results."""
+        if not reranked_facts:
+            return reranked_facts
+
+        from datetime import datetime
+
+        current_time = datetime.now()
+
+        fact_ids = [
+            result["id"] for result in reranked_facts if result.get("type") == "fact"
+        ]
+
+        if fact_ids:
+            self.storage.update_usage_stats(
+                fact_ids, self.config.declarative_collection_name
+            )
+
+            # Update the metadata in results to reflect new usage stats
+            for result in reranked_facts:
+                if result.get("type") == "fact":
+                    current_count = result["metadata"].get("usage_count", 0)
+                    result["metadata"]["usage_count"] = current_count + 1
+                    result["metadata"]["last_used_at"] = current_time.isoformat()
+
+        return reranked_facts
+
+    def _update_usage_statistics(
+        self,
+        reranked_experiences: list[dict[str, Any]],
+        reranked_facts: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """
+        Update usage statistics for retrieved memories.
+
+        Args:
+            reranked_experiences: List of experience results from reranking
+            reranked_facts: List of fact results from reranking
+
+        Returns:
+            Tuple of (updated_experiences, updated_facts) with new usage stats
+        """
+        try:
+            updated_experiences = self._update_experience_usage(reranked_experiences)
+            updated_facts = self._update_fact_usage(reranked_facts)
+            return updated_experiences, updated_facts
+        except Exception as e:
+            # Log the error but don't fail the retrieval
+            self.logger.warning(f"Failed to update usage statistics: {e}")
+            return reranked_experiences, reranked_facts
+
+    def _perform_hybrid_search(
+        self,
+        query: str,
+        query_embedding: list[float],
+        query_keywords: list[str],
+        top_n: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Perform hybrid search for both experiences and facts."""
+        # Use larger candidate pool for hybrid search
+        top_k = top_n * 4  # Get more candidates for better reranking
+
+        # Parallel hybrid retrieval for experiences
+        vector_experiences = self._vector_search_experiences(query_embedding, top_k)
+        keyword_experiences = self._keyword_search_experiences(query_keywords, top_k)
+
+        # Parallel hybrid retrieval for facts
+        vector_facts = self._vector_search_facts(query_embedding, top_k)
+        keyword_facts = self._keyword_search_facts(query_keywords, top_k)
+
+        # Merge and deduplicate results
+        merged_experiences = self._merge_and_deduplicate_results(
+            vector_experiences, keyword_experiences
+        )
+        merged_facts = self._merge_and_deduplicate_results(vector_facts, keyword_facts)
+
+        # Rerank results
+        reranked_experiences = self._rerank_results(query, merged_experiences, top_n)
+        reranked_facts = self._rerank_results(query, merged_facts, top_n)
+
+        return reranked_experiences, reranked_facts
+
+    def retrieve_memories(self, query: str, top_n: int = 3) -> RetrievalResult:
         """
         Retrieve relevant memories using hybrid search and reranking.
 
         Args:
             query: Query string describing the current task or intent
             top_n: Number of final results to return for each memory type
-            top_k: Number of candidates to retrieve before reranking
 
         Returns:
             RetrievalResult containing relevant experiences and facts
@@ -515,50 +627,46 @@ class MemoryRetriever:
             RetrievalError: If retrieval process fails
         """
         try:
-            # Step 1: Generate query embedding
+            # Prepare query components
             query_embedding = self._generate_query_embedding(query)
-
-            # Step 2: Extract query keywords
             query_keywords = self._extract_query_keywords(query)
 
-            # Step 3: Parallel hybrid retrieval for experiences
-            vector_experiences = self._vector_search_experiences(query_embedding, top_k)
-            keyword_experiences = self._keyword_search_experiences(
-                query_keywords, top_k
+            # Perform hybrid search
+            reranked_experiences, reranked_facts = self._perform_hybrid_search(
+                query, query_embedding, query_keywords, top_n
             )
 
-            # Step 4: Parallel hybrid retrieval for facts
-            vector_facts = self._vector_search_facts(query_embedding, top_k)
-            keyword_facts = self._keyword_search_facts(query_keywords, top_k)
-
-            # Step 5: Merge and deduplicate results
-            merged_experiences = self._merge_and_deduplicate_results(
-                vector_experiences, keyword_experiences
+            # Finalize results
+            result = self._finalize_retrieval_results(
+                reranked_experiences, reranked_facts
             )
-            merged_facts = self._merge_and_deduplicate_results(
-                vector_facts, keyword_facts
-            )
-
-            # Step 6: Rerank results
-            reranked_experiences = self._rerank_results(
-                query, merged_experiences, top_n
-            )
-            reranked_facts = self._rerank_results(query, merged_facts, top_n)
-
-            # Step 7: Convert results back to Pydantic models
-            final_experiences, _ = self._convert_results_to_models(reranked_experiences)
-            _, final_facts = self._convert_results_to_models(reranked_facts)
-
-            # Step 8: Create and return retrieval result
-            return RetrievalResult(
-                experiences=final_experiences,
-                facts=final_facts,
-                query=query,
-                total_results=len(final_experiences) + len(final_facts),
-            )
+            result.query = query
+            return result
 
         except Exception as e:
             raise RetrievalError(f"Memory retrieval failed: {e}") from e
+
+    def _finalize_retrieval_results(
+        self,
+        reranked_experiences: list[dict[str, Any]],
+        reranked_facts: list[dict[str, Any]],
+    ) -> RetrievalResult:
+        """Convert search results to models and create final retrieval result."""
+        # Update usage statistics and get updated results
+        updated_experiences, updated_facts = self._update_usage_statistics(
+            reranked_experiences, reranked_facts
+        )
+
+        # Convert to domain models with updated metadata
+        final_experiences, _ = self._convert_results_to_models(updated_experiences)
+        _, final_facts = self._convert_results_to_models(updated_facts)
+
+        return RetrievalResult(
+            experiences=final_experiences,
+            facts=final_facts,
+            query="",  # Will be set in main method
+            total_results=len(final_experiences) + len(final_facts),
+        )
 
     def get_similar_experiences(
         self, task_description: str, top_n: int = 5
