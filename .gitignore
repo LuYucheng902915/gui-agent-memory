@@ -125,11 +125,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Memory system data
-memory_system/data/
-*.db
-*.sqlite
-*.log
+# Memory system data (runtime generated)
+memory_system/
 
 # IDE / Editor specific
 .vscode/
