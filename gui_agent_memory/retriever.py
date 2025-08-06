@@ -9,6 +9,7 @@ This module handles:
 """
 
 import json
+import logging
 from typing import Any
 
 import jieba
@@ -35,6 +36,7 @@ class MemoryRetriever:
         """Initialize the retrieval system."""
         self.config = get_config()
         self.storage = MemoryStorage()
+        self.logger = logging.getLogger(__name__)
 
     def _generate_query_embedding(self, query: str) -> list[float]:
         """
@@ -399,7 +401,7 @@ class MemoryRetriever:
 
             # Call reranker API
             response = requests.post(
-                reranker_config["base_url"], headers=headers, json=payload
+                reranker_config["base_url"], headers=headers, json=payload, timeout=30
             )
             response.raise_for_status()
 
@@ -419,15 +421,14 @@ class MemoryRetriever:
                         )
                         reranked_results.append(result)
                 return reranked_results
-            else:
-                # Fallback: return original results if API format is unexpected
-                for i, result in enumerate(candidates[:top_n]):
-                    result["rerank_score"] = 1.0 - i * 0.1
-                return candidates[:top_n]
+            # Fallback: return original results if API format is unexpected
+            for i, result in enumerate(candidates[:top_n]):
+                result["rerank_score"] = 1.0 - i * 0.1
+            return candidates[:top_n]
 
         except Exception as e:
             # Fallback: return original results on reranking failure
-            print(f"Reranking failed, using original order: {e}")
+            self.logger.warning("Reranking failed, using original order: %s", e)
             return candidates[:top_n]
 
     def _convert_results_to_models(
@@ -491,7 +492,7 @@ class MemoryRetriever:
                     facts.append(fact)
 
             except Exception as e:
-                print(f"Failed to convert result to model: {e}")
+                self.logger.warning("Failed to convert result to model: %s", e)
                 continue
 
         return experiences, facts
@@ -549,14 +550,12 @@ class MemoryRetriever:
             _, final_facts = self._convert_results_to_models(reranked_facts)
 
             # Step 8: Create and return retrieval result
-            result = RetrievalResult(
+            return RetrievalResult(
                 experiences=final_experiences,
                 facts=final_facts,
                 query=query,
                 total_results=len(final_experiences) + len(final_facts),
             )
-
-            return result
 
         except Exception as e:
             raise RetrievalError(f"Memory retrieval failed: {e}") from e

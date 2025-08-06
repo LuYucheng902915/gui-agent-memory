@@ -132,11 +132,27 @@ your-main-project/
 uv pip install -e ./gui-agent-memory
 ```
 
-### 方法2：通过Git仓库安装（未测试）
+### 方法2：通过Git仓库安装 ✅
 
 如果您的项目已推送到Git仓库，可以直接从URL安装：
+
+#### 使用 uv 安装（推荐）
 ```bash
-uv pip install git+https://github.com/your-username/gui-agent-memory.git
+# 创建虚拟环境
+uv venv
+source .venv/bin/activate  # Linux/Mac
+# 或 .venv\Scripts\activate  # Windows
+
+# 使用 uv 安装
+uv pip install git+https://github.com/LuYucheng902915/gui-agent-memory.git
+```
+
+安装后可以直接使用：
+```python
+from gui_agent_memory import MemorySystem
+
+# 创建记忆系统实例
+memory = MemorySystem()
 ```
 
 ## 📁 项目结构

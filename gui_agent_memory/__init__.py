@@ -22,4 +22,4 @@ __author__ = "GUI Agent Team"
 from .main import MemorySystem
 from .models import ActionStep, ExperienceRecord, FactRecord
 
-__all__ = ["MemorySystem", "ActionStep", "ExperienceRecord", "FactRecord"]
+__all__ = ["ActionStep", "ExperienceRecord", "FactRecord", "MemorySystem"]

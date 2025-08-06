@@ -342,7 +342,9 @@ class TestEnvironmentErrorHandling:
 
         from gui_agent_memory.config import MemoryConfig
 
-        with patch("gui_agent_memory.config.OpenAI"):
+        with (
+            patch("gui_agent_memory.config.OpenAI"),
+            pytest.raises(ValueError),
+        ):
             # Should raise ValueError when trying to convert "not_a_number" to int
-            with pytest.raises(ValueError):
-                MemoryConfig()
+            MemoryConfig()

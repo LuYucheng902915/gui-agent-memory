@@ -16,20 +16,17 @@ class TestMemorySystem:
     @pytest.fixture
     def mock_storage(self):
         """Mock storage for testing."""
-        storage = Mock()
-        return storage
+        return Mock()
 
     @pytest.fixture
     def mock_ingestion(self):
         """Mock ingestion for testing."""
-        ingestion = Mock()
-        return ingestion
+        return Mock()
 
     @pytest.fixture
     def mock_retriever(self):
         """Mock retriever for testing."""
-        retriever = Mock()
-        return retriever
+        return Mock()
 
     @pytest.fixture
     def memory_system(self, mock_storage, mock_ingestion, mock_retriever, mock_config):

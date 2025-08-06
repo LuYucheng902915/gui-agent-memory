@@ -11,8 +11,8 @@ This module handles:
 
 import json
 import logging
-import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import jieba
@@ -47,9 +47,8 @@ class MemoryIngestion:
 
     def _setup_logging(self) -> None:
         """Setup logging for failed learning tasks."""
-        os.makedirs(
-            os.path.dirname(self.config.failed_learning_log_path), exist_ok=True
-        )
+        log_path = Path(self.config.failed_learning_log_path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
@@ -64,18 +63,20 @@ class MemoryIngestion:
         """Load prompt templates from files."""
         try:
             # Load experience distillation prompt
-            experience_prompt_path = os.path.join(
-                os.path.dirname(__file__), "prompts", "experience_distillation.txt"
+            experience_prompt_path = (
+                Path(__file__).parent / "prompts" / "experience_distillation.txt"
             )
-            with open(experience_prompt_path, encoding="utf-8") as f:
-                self.experience_distillation_prompt = f.read()
+            self.experience_distillation_prompt = experience_prompt_path.read_text(
+                encoding="utf-8"
+            )
 
             # Load keyword extraction prompt
-            keyword_prompt_path = os.path.join(
-                os.path.dirname(__file__), "prompts", "keyword_extraction.txt"
+            keyword_prompt_path = (
+                Path(__file__).parent / "prompts" / "keyword_extraction.txt"
             )
-            with open(keyword_prompt_path, encoding="utf-8") as f:
-                self.keyword_extraction_prompt = f.read()
+            self.keyword_extraction_prompt = keyword_prompt_path.read_text(
+                encoding="utf-8"
+            )
 
         except Exception as e:
             raise IngestionError(f"Failed to load prompt templates: {e}") from e
@@ -178,7 +179,11 @@ class MemoryIngestion:
                 temperature=0.1,
             )
 
-            result = response.choices[0].message.content.strip()
+            result = response.choices[0].message.content
+            if result is None:
+                raise IngestionError("LLM returned empty response")
+
+            result = result.strip()
             keywords = json.loads(result)
 
             return keywords if isinstance(keywords, list) else []
@@ -229,7 +234,11 @@ class MemoryIngestion:
                 temperature=0.2,
             )
 
-            result = response.choices[0].message.content.strip()
+            result = response.choices[0].message.content
+            if result is None:
+                raise IngestionError("LLM returned empty response")
+
+            result = result.strip()
 
             # Try to extract JSON from the response
             if "```json" in result:
@@ -239,8 +248,7 @@ class MemoryIngestion:
             else:
                 json_str = result
 
-            distilled_data = json.loads(json_str)
-            return distilled_data
+            return json.loads(json_str)
 
         except Exception as e:
             raise IngestionError(f"Failed to distill experience with LLM: {e}") from e

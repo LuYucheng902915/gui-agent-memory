@@ -4,8 +4,7 @@ Tests experience learning and knowledge ingestion functionality.
 """
 
 import json
-import os
-from unittest.mock import Mock, mock_open, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -225,25 +224,19 @@ class TestMemoryIngestion:
         experience_prompt = "Experience distillation prompt: {raw_history}"
         keyword_prompt = "Keyword extraction prompt: {text}"
 
-        with patch("builtins.open", mock_open()) as mock_file:
-            mock_file.return_value.read.side_effect = [
-                experience_prompt,
-                keyword_prompt,
-            ]
+        with (
+            patch("gui_agent_memory.ingestion.get_config", return_value=mock_config),
+            patch(
+                "gui_agent_memory.ingestion.MemoryStorage",
+                return_value=mock_storage,
+            ),
+            patch("pathlib.Path.read_text") as mock_read_text,
+        ):
+            mock_read_text.side_effect = [experience_prompt, keyword_prompt]
+            ingestion = MemoryIngestion()
 
-            with (
-                patch(
-                    "gui_agent_memory.ingestion.get_config", return_value=mock_config
-                ),
-                patch(
-                    "gui_agent_memory.ingestion.MemoryStorage",
-                    return_value=mock_storage,
-                ),
-            ):
-                ingestion = MemoryIngestion()
-
-                assert ingestion.experience_distillation_prompt == experience_prompt
-                assert ingestion.keyword_extraction_prompt == keyword_prompt
+            assert ingestion.experience_distillation_prompt == experience_prompt
+            assert ingestion.keyword_extraction_prompt == keyword_prompt
 
     def test_prompt_template_loading_failure(self, mock_config, mock_storage):
         """Test error handling when prompt templates fail to load."""
@@ -255,21 +248,15 @@ class TestMemoryIngestion:
                 "gui_agent_memory.ingestion.MemoryStorage",
                 return_value=mock_storage,
             ),
+            patch(
+                "pathlib.Path.read_text",
+                side_effect=FileNotFoundError("Prompt file not found"),
+            ),
         ):
-            # Mock the prompt file loading specifically to fail
-            original_open = open
+            with pytest.raises(IngestionError) as exc_info:
+                MemoryIngestion()
 
-            def mock_open_func(path, *args, **kwargs):
-                # Use os.path.normpath to handle different path separators
-                if "prompts" in os.path.normpath(str(path)):
-                    raise FileNotFoundError("Prompt file not found")
-                return original_open(path, *args, **kwargs)
-
-            with patch("builtins.open", side_effect=mock_open_func):
-                with pytest.raises(IngestionError) as exc_info:
-                    MemoryIngestion()
-
-                assert "Failed to load prompt templates" in str(exc_info.value)
+            assert "Failed to load prompt templates" in str(exc_info.value)
 
     def test_learn_from_complex_task(self, ingestion, mock_config, complex_raw_history):
         """Test learning from complex task with multiple action types."""
@@ -410,7 +397,7 @@ class TestMemoryIngestion:
         experience_records = call_args[0][0]
         assert experience_records[0].is_successful is False
 
-    def test_duplicate_task_handling(self, ingestion, mock_config, sample_raw_history):
+    def test_duplicate_task_handling(self, ingestion, sample_raw_history):
         """Test handling of duplicate task IDs."""
         # Mock storage to indicate task already exists
         ingestion.storage.experience_exists.return_value = True

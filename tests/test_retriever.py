@@ -17,8 +17,7 @@ class TestMemoryRetriever:
     @pytest.fixture
     def mock_storage(self):
         """Mock storage for testing."""
-        storage = Mock()
-        return storage
+        return Mock()
 
     @pytest.fixture
     def retriever(self, mock_config, mock_storage):
@@ -331,7 +330,9 @@ class TestMemoryRetriever:
 
         # Mock reranking (disable for simplicity) - fixed parameter order
         with patch.object(
-            retriever, "_rerank_results", side_effect=lambda q, x, top_n=10: x
+            retriever,
+            "_rerank_results",
+            side_effect=lambda _q, x, top_n=10: x,  # noqa: ARG005
         ):
             result = retriever.retrieve_memories(query, top_n=1)
 

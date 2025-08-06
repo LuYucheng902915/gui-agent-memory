@@ -16,6 +16,7 @@ except ImportError:
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -77,21 +78,15 @@ def mock_config():
 @pytest.fixture
 def api_responses():
     """Load mock API responses from JSON file."""
-    responses_path = os.path.join(
-        os.path.dirname(__file__), "mocks", "api_responses.json"
-    )
-    with open(responses_path) as f:
-        return json.load(f)
+    responses_path = Path(__file__).parent / "mocks" / "api_responses.json"
+    return json.loads(responses_path.read_text())
 
 
 @pytest.fixture
 def test_fixtures():
     """Load test fixtures from JSON file."""
-    fixtures_path = os.path.join(
-        os.path.dirname(__file__), "mocks", "test_fixtures.json"
-    )
-    with open(fixtures_path) as f:
-        return json.load(f)
+    fixtures_path = Path(__file__).parent / "mocks" / "test_fixtures.json"
+    return json.loads(fixtures_path.read_text())
 
 
 @pytest.fixture

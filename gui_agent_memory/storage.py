@@ -9,8 +9,10 @@ This module handles:
 """
 
 import json
-import os
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
+
+import chromadb
 
 # Fix SQLite version compatibility for ChromaDB
 try:
@@ -22,7 +24,6 @@ try:
 except ImportError:
     pass
 
-import chromadb
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 
@@ -53,7 +54,7 @@ class MemoryStorage:
         """Initialize ChromaDB client with persistent storage."""
         try:
             # Ensure data directory exists
-            os.makedirs(self.config.chroma_db_path, exist_ok=True)
+            Path(self.config.chroma_db_path).mkdir(parents=True, exist_ok=True)
 
             # Initialize ChromaDB client with persistent storage
             self.client = chromadb.PersistentClient(
@@ -74,14 +75,14 @@ class MemoryStorage:
             # Get or create experiential memories collection
             self.experiential_collection = self.client.get_or_create_collection(
                 name=self.config.experiential_collection_name,
-                embedding_function=embedding_function,
+                embedding_function=embedding_function,  # type: ignore[arg-type]
                 metadata={"description": "Operational experiences and action flows"},
             )
 
             # Get or create declarative memories collection
             self.declarative_collection = self.client.get_or_create_collection(
                 name=self.config.declarative_collection_name,
-                embedding_function=embedding_function,
+                embedding_function=embedding_function,  # type: ignore[arg-type]
                 metadata={"description": "Semantic knowledge and facts"},
             )
 
@@ -104,10 +105,9 @@ class MemoryStorage:
         try:
             if collection_name == self.config.experiential_collection_name:
                 return self.experiential_collection
-            elif collection_name == self.config.declarative_collection_name:
+            if collection_name == self.config.declarative_collection_name:
                 return self.declarative_collection
-            else:
-                raise StorageError(f"Unknown collection: {collection_name}")
+            raise StorageError(f"Unknown collection: {collection_name}")
         except Exception as e:
             raise StorageError(
                 f"Failed to get collection {collection_name}: {e}"
@@ -156,13 +156,19 @@ class MemoryStorage:
                 # Convert keywords list to comma-separated string for ChromaDB
                 if "keywords" in metadata and isinstance(metadata["keywords"], list):
                     metadata["keywords"] = ",".join(metadata["keywords"])
-                metadatas.append(metadata)
+                # Ensure metadata values are compatible with ChromaDB
+                clean_metadata = {
+                    k: v
+                    for k, v in metadata.items()
+                    if isinstance(v, str | int | float | bool) or v is None
+                }
+                metadatas.append(clean_metadata)
 
             self.experiential_collection.add(
                 ids=ids,
                 documents=documents,
-                metadatas=metadatas,
-                embeddings=embeddings,
+                metadatas=metadatas,  # type: ignore[arg-type]
+                embeddings=embeddings,  # type: ignore[arg-type]
             )
 
             return ids
@@ -209,13 +215,19 @@ class MemoryStorage:
                 # Convert keywords list to comma-separated string for ChromaDB
                 if "keywords" in metadata and isinstance(metadata["keywords"], list):
                     metadata["keywords"] = ",".join(metadata["keywords"])
-                metadatas.append(metadata)
+                # Ensure metadata values are compatible with ChromaDB
+                clean_metadata = {
+                    k: v
+                    for k, v in metadata.items()
+                    if isinstance(v, str | int | float | bool) or v is None
+                }
+                metadatas.append(clean_metadata)
 
             self.declarative_collection.add(
                 ids=ids,
                 documents=documents,
-                metadatas=metadatas,
-                embeddings=embeddings,
+                metadatas=metadatas,  # type: ignore[arg-type]
+                embeddings=embeddings,  # type: ignore[arg-type]
             )
 
             return ids
@@ -246,13 +258,13 @@ class MemoryStorage:
             StorageError: If query operation fails
         """
         try:
-            results = self.experiential_collection.query(
-                query_embeddings=query_embeddings,
+            result = self.experiential_collection.query(
+                query_embeddings=query_embeddings,  # type: ignore[arg-type]
                 query_texts=query_texts,
                 where=where,
                 n_results=n_results,
             )
-            return results
+            return cast(dict[str, list[Any]], result)
         except Exception as e:
             raise StorageError(f"Failed to query experiences: {e}") from e
 
@@ -279,13 +291,13 @@ class MemoryStorage:
             StorageError: If query operation fails
         """
         try:
-            results = self.declarative_collection.query(
-                query_embeddings=query_embeddings,
+            result = self.declarative_collection.query(
+                query_embeddings=query_embeddings,  # type: ignore[arg-type]
                 query_texts=query_texts,
                 where=where,
                 n_results=n_results,
             )
-            return results
+            return cast(dict[str, list[Any]], result)
         except Exception as e:
             raise StorageError(f"Failed to query facts: {e}") from e
 
