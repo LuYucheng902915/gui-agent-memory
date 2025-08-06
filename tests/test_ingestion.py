@@ -2,14 +2,13 @@
 Test suite for the ingestion layer.
 Tests experience learning and knowledge ingestion functionality.
 """
-import json
-import pytest
-from unittest.mock import Mock, patch, mock_open
-from datetime import datetime
-from pathlib import Path
 
-from gui_agent_memory.ingestion import MemoryIngestion, IngestionError
-from gui_agent_memory.models import ExperienceRecord, FactRecord, ActionStep
+import json
+from unittest.mock import Mock, patch
+
+import pytest
+
+from gui_agent_memory.ingestion import MemoryIngestion
 
 
 class TestMemoryIngestion:
@@ -28,8 +27,12 @@ class TestMemoryIngestion:
     @pytest.fixture
     def ingestion(self, mock_config, mock_storage):
         """Create MemoryIngestion instance with mocked dependencies."""
-        with patch('gui_agent_memory.ingestion.get_config', return_value=mock_config), \
-             patch('gui_agent_memory.ingestion.MemoryStorage', return_value=mock_storage):
+        with (
+            patch("gui_agent_memory.ingestion.get_config", return_value=mock_config),
+            patch(
+                "gui_agent_memory.ingestion.MemoryStorage", return_value=mock_storage
+            ),
+        ):
             return MemoryIngestion()
 
     @pytest.fixture
@@ -40,15 +43,15 @@ class TestMemoryIngestion:
                 "thought": "I need to click the login button",
                 "action": "click",
                 "target": "login_button",
-                "result": "success"
+                "result": "success",
             },
             {
                 "thought": "Now I'll enter the username",
                 "action": "type",
                 "target": "username_field",
                 "text": "user@example.com",
-                "result": "success"
-            }
+                "result": "success",
+            },
         ]
 
     @pytest.fixture
@@ -61,22 +64,26 @@ class TestMemoryIngestion:
                 {
                     "thought": "I need to click the login button",
                     "action": "click",
-                    "target_element_description": "login button"
+                    "target_element_description": "login button",
                 },
                 {
                     "thought": "Now I'll enter the username",
-                    "action": "type", 
-                    "target_element_description": "username input field"
-                }
+                    "action": "type",
+                    "target_element_description": "username input field",
+                },
             ],
-            "preconditions": "User must be on the login page"
+            "preconditions": "User must be on the login page",
         }
 
     @pytest.mark.unit
     def test_init(self, mock_config, mock_storage):
         """Test MemoryIngestion initialization."""
-        with patch('gui_agent_memory.ingestion.get_config', return_value=mock_config), \
-             patch('gui_agent_memory.ingestion.MemoryStorage', return_value=mock_storage):
+        with (
+            patch("gui_agent_memory.ingestion.get_config", return_value=mock_config),
+            patch(
+                "gui_agent_memory.ingestion.MemoryStorage", return_value=mock_storage
+            ),
+        ):
             ingestion = MemoryIngestion()
             assert ingestion.storage == mock_storage
             assert ingestion.config == mock_config
@@ -98,16 +105,22 @@ class TestMemoryIngestion:
         mock_config.embedding_client.embeddings.create.assert_called_once()
 
     @pytest.mark.unit
-    def test_learn_from_task_success(self, ingestion, mock_config, sample_raw_history, mock_experience_response):
+    def test_learn_from_task_success(
+        self, ingestion, mock_config, sample_raw_history, mock_experience_response
+    ):
         """Test successful learning from task execution."""
         # Arrange
         mock_choice = Mock()
         mock_choice.message.content = json.dumps(mock_experience_response)
-        mock_config.experience_llm_client.chat.completions.create.return_value.choices = [mock_choice]
-        
+        mock_config.experience_llm_client.chat.completions.create.return_value.choices = [
+            mock_choice
+        ]
+
         mock_embedding_response = Mock()
         mock_embedding_response.data = [Mock(embedding=[0.1, 0.2, 0.3])]
-        mock_config.embedding_client.embeddings.create.return_value = mock_embedding_response
+        mock_config.embedding_client.embeddings.create.return_value = (
+            mock_embedding_response
+        )
 
         # Act
         result = ingestion.learn_from_task(
@@ -115,7 +128,7 @@ class TestMemoryIngestion:
             task_description="Login to application",
             is_successful=True,
             source_task_id="task_123",
-            app_name="TestApp"
+            app_name="TestApp",
         )
 
         # Assert - check that it returns a success message, not just the task ID
@@ -128,13 +141,15 @@ class TestMemoryIngestion:
         # Arrange
         mock_embedding_response = Mock()
         mock_embedding_response.data = [Mock(embedding=[0.1, 0.2, 0.3])]
-        mock_config.embedding_client.embeddings.create.return_value = mock_embedding_response
+        mock_config.embedding_client.embeddings.create.return_value = (
+            mock_embedding_response
+        )
 
         # Act
         result = ingestion.add_fact(
             content="Python is a programming language",
             keywords=["python", "programming", "language"],
-            source="manual"
+            source="manual",
         )
 
         # Assert

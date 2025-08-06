@@ -6,26 +6,33 @@ Provides common test fixtures, mocks, and utility functions.
 
 # Fix SQLite version compatibility for ChromaDB before any other imports
 try:
-    import pysqlite3 as sqlite3
     import sys
-    sys.modules['sqlite3'] = sqlite3
+
+    import pysqlite3 as sqlite3
+
+    sys.modules["sqlite3"] = sqlite3
 except ImportError:
     pass
 
 import json
 import os
-from typing import Any, Dict
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 # Set up environment variables for all tests
 os.environ.setdefault("GITEE_AI_EMBEDDING_BASE_URL", "https://ai.gitee.com/v1")
-os.environ.setdefault("GITEE_AI_EMBEDDING_API_KEY", "IO44Z7ZON8LTRAYVMXF7A20NIRNDLRNQR2W6XX1U")
+os.environ.setdefault(
+    "GITEE_AI_EMBEDDING_API_KEY", "IO44Z7ZON8LTRAYVMXF7A20NIRNDLRNQR2W6XX1U"
+)
 os.environ.setdefault("GITEE_AI_RERANKER_BASE_URL", "https://ai.gitee.com/v1/rerank")
-os.environ.setdefault("GITEE_AI_RERANKER_API_KEY", "IO44Z7ZON8LTRAYVMXF7A20NIRNDLRNQR2W6XX1U")
+os.environ.setdefault(
+    "GITEE_AI_RERANKER_API_KEY", "IO44Z7ZON8LTRAYVMXF7A20NIRNDLRNQR2W6XX1U"
+)
 os.environ.setdefault("EXPERIENCE_LLM_BASE_URL", "https://poloai.top/v1")
-os.environ.setdefault("EXPERIENCE_LLM_API_KEY", "sk-icEwgvQl5Jmb42Ec8aHVnmLNG7kEUyIa6TDToilFxXSOxkeW")
+os.environ.setdefault(
+    "EXPERIENCE_LLM_API_KEY", "sk-icEwgvQl5Jmb42Ec8aHVnmLNG7kEUyIa6TDToilFxXSOxkeW"
+)
 
 
 @pytest.fixture
@@ -48,20 +55,24 @@ def mock_config():
     config.default_top_n = 3
     config.embedding_dimension = 10
     config.failed_learning_log_path = "./test_logs/failed_learning.jsonl"
-    
+
     # Mock clients - set up as both direct attributes and return values for compatibility
     config.gitee_ai_client = Mock()
     config.experience_llm_client = Mock()
-    config.embedding_client = config.gitee_ai_client  # Add direct reference for test compatibility
+    config.embedding_client = (
+        config.gitee_ai_client
+    )  # Add direct reference for test compatibility
     config.get_embedding_client = Mock(return_value=config.gitee_ai_client)
-    config.get_reranker_config = Mock(return_value={
-        "base_url": "https://ai.gitee.com/v1/rerank",
-        "api_key": "test_gitee_key",
-        "model": "test-reranker-model"
-    })
+    config.get_reranker_config = Mock(
+        return_value={
+            "base_url": "https://ai.gitee.com/v1/rerank",
+            "api_key": "test_gitee_key",
+            "model": "test-reranker-model",
+        }
+    )
     config.get_experience_llm_client = Mock(return_value=config.experience_llm_client)
     config.validate_configuration = Mock(return_value=True)
-    
+
     return config
 
 
@@ -71,7 +82,7 @@ def api_responses():
     responses_path = os.path.join(
         os.path.dirname(__file__), "mocks", "api_responses.json"
     )
-    with open(responses_path, 'r') as f:
+    with open(responses_path, "r") as f:
         return json.load(f)
 
 
@@ -81,7 +92,7 @@ def test_fixtures():
     fixtures_path = os.path.join(
         os.path.dirname(__file__), "mocks", "test_fixtures.json"
     )
-    with open(fixtures_path, 'r') as f:
+    with open(fixtures_path, "r") as f:
         return json.load(f)
 
 
@@ -89,24 +100,28 @@ def test_fixtures():
 def mock_openai_client(api_responses):
     """Mock OpenAI client with pre-configured responses."""
     client = Mock()
-    
+
     # Mock embeddings
     embedding_response = Mock()
     embedding_response.data = [Mock()]
-    embedding_response.data[0].embedding = api_responses["embedding_response"]["data"][0]["embedding"]
+    embedding_response.data[0].embedding = api_responses["embedding_response"]["data"][
+        0
+    ]["embedding"]
     client.embeddings.create.return_value = embedding_response
-    
+
     # Mock chat completions
     chat_response = Mock()
     chat_response.choices = [Mock()]
-    chat_response.choices[0].message.content = api_responses["experience_distillation_response"]["choices"][0]["message"]["content"]
+    chat_response.choices[0].message.content = api_responses[
+        "experience_distillation_response"
+    ]["choices"][0]["message"]["content"]
     client.chat.completions.create.return_value = chat_response
-    
+
     # Mock models list
     models_response = Mock()
     models_response.data = api_responses["models_list_response"]["data"]
     client.models.list.return_value = models_response
-    
+
     return client
 
 
@@ -121,7 +136,7 @@ def mock_chromadb_collection():
         "ids": [[]],
         "documents": [[]],
         "metadatas": [[]],
-        "distances": [[]]
+        "distances": [[]],
     }
     return collection
 
@@ -145,19 +160,19 @@ def mock_storage(mock_chromadb_collection):
         "ids": [[]],
         "documents": [[]],
         "metadatas": [[]],
-        "distances": [[]]
+        "distances": [[]],
     }
     storage.query_facts.return_value = {
         "ids": [[]],
         "documents": [[]],
         "metadatas": [[]],
-        "distances": [[]]
+        "distances": [[]],
     }
     storage.experience_exists.return_value = False
     storage.get_collection_stats.return_value = {
         "experiential_memories": 0,
         "declarative_memories": 0,
-        "total": 0
+        "total": 0,
     }
     storage.clear_collections.return_value = None
     return storage
@@ -166,8 +181,8 @@ def mock_storage(mock_chromadb_collection):
 @pytest.fixture
 def sample_experience_record():
     """Sample ExperienceRecord for testing."""
-    from gui_agent_memory.models import ExperienceRecord, ActionStep
-    
+    from gui_agent_memory.models import ActionStep, ExperienceRecord
+
     return ExperienceRecord(
         task_description="Log into Gmail using Chrome browser",
         keywords=["gmail", "login", "chrome", "browser"],
@@ -175,22 +190,22 @@ def sample_experience_record():
             ActionStep(
                 thought="Navigate to Gmail login page",
                 action="navigate",
-                target_element_description="Chrome address bar"
+                target_element_description="Chrome address bar",
             ),
             ActionStep(
                 thought="Enter email address",
                 action="type",
-                target_element_description="Email input field"
+                target_element_description="Email input field",
             ),
             ActionStep(
                 thought="Click sign in button",
-                action="click", 
-                target_element_description="Sign in button"
-            )
+                action="click",
+                target_element_description="Sign in button",
+            ),
         ],
         preconditions="Chrome browser is open",
         is_successful=True,
-        source_task_id="test_task_001"
+        source_task_id="test_task_001",
     )
 
 
@@ -198,11 +213,11 @@ def sample_experience_record():
 def sample_fact_record():
     """Sample FactRecord for testing."""
     from gui_agent_memory.models import FactRecord
-    
+
     return FactRecord(
         content="Chrome browser stores passwords in the password manager",
         keywords=["chrome", "password", "security", "browser"],
-        source="documentation"
+        source="documentation",
     )
 
 
@@ -210,12 +225,9 @@ def sample_fact_record():
 def sample_retrieval_result():
     """Sample RetrievalResult for testing."""
     from gui_agent_memory.models import RetrievalResult
-    
+
     return RetrievalResult(
-        experiences=[],
-        facts=[],
-        query="Test query",
-        total_results=0
+        experiences=[], facts=[], query="Test query", total_results=0
     )
 
 
@@ -227,34 +239,34 @@ def sample_raw_history():
             "thought": "I need to click the login button",
             "action": "click",
             "target": "login_button",
-            "result": "success"
+            "result": "success",
         },
         {
             "thought": "Now I'll enter the username",
             "action": "type",
             "target": "username_field",
             "text": "user@example.com",
-            "result": "success"
+            "result": "success",
         },
         {
             "thought": "I need to enter the password",
             "action": "type",
             "target": "password_field",
             "text": "password123",
-            "result": "success"
+            "result": "success",
         },
         {
             "thought": "I should click the submit button",
             "action": "click",
             "target": "submit_button",
-            "result": "success"
+            "result": "success",
         },
         {
             "thought": "Wait for the page to load",
             "action": "wait",
             "target": "dashboard",
-            "result": "success"
-        }
+            "result": "success",
+        },
     ]
 
 
@@ -262,24 +274,24 @@ def sample_raw_history():
 def sample_learning_request():
     """Sample LearningRequest for testing."""
     from gui_agent_memory.models import LearningRequest
-    
+
     return LearningRequest(
         raw_history=[
             {"action": "click", "target": "button", "thought": "Need to click"}
         ],
         is_successful=True,
         source_task_id="test_123",
-        app_name="TestApp"
+        app_name="TestApp",
     )
 
 
 def create_mock_experience_record(test_fixtures):
     """Create a mock ExperienceRecord from fixtures."""
-    from gui_agent_memory.models import ExperienceRecord, ActionStep
-    
+    from gui_agent_memory.models import ActionStep, ExperienceRecord
+
     fixture = test_fixtures["sample_experience_record"]
     action_steps = [ActionStep(**step) for step in fixture["action_flow"]]
-    
+
     return ExperienceRecord(
         task_description=fixture["task_description"],
         keywords=fixture["keywords"],
@@ -287,27 +299,27 @@ def create_mock_experience_record(test_fixtures):
         preconditions=fixture["preconditions"],
         is_successful=fixture["is_successful"],
         usage_count=fixture["usage_count"],
-        source_task_id=fixture["source_task_id"]
+        source_task_id=fixture["source_task_id"],
     )
 
 
 def create_mock_fact_record(test_fixtures):
     """Create a mock FactRecord from fixtures."""
     from gui_agent_memory.models import FactRecord
-    
+
     fixture = test_fixtures["sample_fact_record"]
-    
+
     return FactRecord(
         content=fixture["content"],
         keywords=fixture["keywords"],
         source=fixture["source"],
-        usage_count=fixture["usage_count"]
+        usage_count=fixture["usage_count"],
     )
 
 
 class TestEnvironment:
     """Test environment setup utilities."""
-    
+
     @staticmethod
     def setup_test_env():
         """Setup test environment variables."""
@@ -318,7 +330,7 @@ class TestEnvironment:
         os.environ["EXPERIENCE_LLM_BASE_URL"] = "https://test-llm.example.com/v1"
         os.environ["EXPERIENCE_LLM_API_KEY"] = "test_llm_key"
         os.environ["CHROMA_DB_PATH"] = "./test_data/chroma"
-    
+
     @staticmethod
     def cleanup_test_env():
         """Clean up test environment."""
@@ -329,7 +341,7 @@ class TestEnvironment:
             "GITEE_AI_RERANKER_API_KEY",
             "EXPERIENCE_LLM_BASE_URL",
             "EXPERIENCE_LLM_API_KEY",
-            "CHROMA_DB_PATH"
+            "CHROMA_DB_PATH",
         ]
         for var in test_vars:
             if var in os.environ:

@@ -18,8 +18,6 @@ from openai import OpenAI
 class ConfigurationError(Exception):
     """Raised when required configuration is missing or invalid."""
 
-    pass
-
 
 class MemoryConfig:
     """

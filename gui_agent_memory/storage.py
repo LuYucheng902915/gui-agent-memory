@@ -10,13 +10,15 @@ This module handles:
 
 import json
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 # Fix SQLite version compatibility for ChromaDB
 try:
-    import pysqlite3 as sqlite3
     import sys
-    sys.modules['sqlite3'] = sqlite3
+
+    import pysqlite3 as sqlite3
+
+    sys.modules["sqlite3"] = sqlite3
 except ImportError:
     pass
 
@@ -31,13 +33,11 @@ from .models import ExperienceRecord, FactRecord
 class StorageError(Exception):
     """Exception raised for storage-related errors."""
 
-    pass
-
 
 class MemoryStorage:
     """
     Storage layer implementation using ChromaDB for vector and metadata storage.
-    
+
     Manages two separate collections:
     - experiential_memories: For operational experiences (ExperienceRecord)
     - declarative_memories: For semantic knowledge (FactRecord)
@@ -91,13 +91,13 @@ class MemoryStorage:
     def get_collection(self, collection_name: str) -> chromadb.Collection:
         """
         Get a collection by name.
-        
+
         Args:
             collection_name: Name of the collection
-            
+
         Returns:
             ChromaDB collection object
-            
+
         Raises:
             StorageError: If collection doesn't exist
         """
@@ -112,20 +112,18 @@ class MemoryStorage:
             raise StorageError(f"Failed to get collection {collection_name}: {e}")
 
     def add_experiences(
-        self, 
-        experiences: List[ExperienceRecord], 
-        embeddings: List[List[float]]
+        self, experiences: List[ExperienceRecord], embeddings: List[List[float]]
     ) -> List[str]:
         """
         Add experience records to the experiential memories collection.
-        
+
         Args:
             experiences: List of experience records to add
             embeddings: List of embedding vectors for each experience
-            
+
         Returns:
             List of IDs of the added records
-            
+
         Raises:
             StorageError: If storage operation fails
         """
@@ -171,20 +169,18 @@ class MemoryStorage:
             raise StorageError(f"Failed to add experiences: {e}")
 
     def add_facts(
-        self, 
-        facts: List[FactRecord], 
-        embeddings: List[List[float]]
+        self, facts: List[FactRecord], embeddings: List[List[float]]
     ) -> List[str]:
         """
         Add fact records to the declarative memories collection.
-        
+
         Args:
             facts: List of fact records to add
             embeddings: List of embedding vectors for each fact
-            
+
         Returns:
             List of IDs of the added records
-            
+
         Raises:
             StorageError: If storage operation fails
         """
@@ -234,16 +230,16 @@ class MemoryStorage:
     ) -> Dict[str, List[Any]]:
         """
         Query the experiential memories collection.
-        
+
         Args:
             query_embeddings: List of query embedding vectors
             query_texts: List of query texts (alternative to embeddings)
             where: Metadata filter conditions
             n_results: Maximum number of results to return
-            
+
         Returns:
             Dictionary containing query results
-            
+
         Raises:
             StorageError: If query operation fails
         """
@@ -267,16 +263,16 @@ class MemoryStorage:
     ) -> Dict[str, List[Any]]:
         """
         Query the declarative memories collection.
-        
+
         Args:
             query_embeddings: List of query embedding vectors
             query_texts: List of query texts (alternative to embeddings)
             where: Metadata filter conditions
             n_results: Maximum number of results to return
-            
+
         Returns:
             Dictionary containing query results
-            
+
         Raises:
             StorageError: If query operation fails
         """
@@ -294,10 +290,10 @@ class MemoryStorage:
     def experience_exists(self, source_task_id: str) -> bool:
         """
         Check if an experience with the given source_task_id already exists.
-        
+
         Args:
             source_task_id: Unique identifier for the source task
-            
+
         Returns:
             True if experience exists, False otherwise
         """
@@ -310,7 +306,7 @@ class MemoryStorage:
     def get_collection_stats(self) -> Dict[str, int]:
         """
         Get statistics about the collections.
-        
+
         Returns:
             Dictionary with collection statistics
         """

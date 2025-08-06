@@ -2,12 +2,12 @@
 Test suite for the main API interface.
 Tests high-level memory system operations.
 """
-import pytest
-from unittest.mock import Mock, patch
-from datetime import datetime
 
-from gui_agent_memory.main import MemorySystem, MemorySystemError
-from gui_agent_memory.models import ExperienceRecord, FactRecord, ActionStep
+from unittest.mock import Mock, patch
+
+import pytest
+
+from gui_agent_memory.main import MemorySystem
 
 
 class TestMemorySystem:
@@ -34,10 +34,12 @@ class TestMemorySystem:
     @pytest.fixture
     def memory_system(self, mock_storage, mock_ingestion, mock_retriever, mock_config):
         """Create MemorySystem instance with mocked dependencies."""
-        with patch('gui_agent_memory.main.MemoryStorage', return_value=mock_storage), \
-             patch('gui_agent_memory.main.MemoryIngestion', return_value=mock_ingestion), \
-             patch('gui_agent_memory.main.MemoryRetriever', return_value=mock_retriever), \
-             patch('gui_agent_memory.main.get_config', return_value=mock_config):
+        with (
+            patch("gui_agent_memory.main.MemoryStorage", return_value=mock_storage),
+            patch("gui_agent_memory.main.MemoryIngestion", return_value=mock_ingestion),
+            patch("gui_agent_memory.main.MemoryRetriever", return_value=mock_retriever),
+            patch("gui_agent_memory.main.get_config", return_value=mock_config),
+        ):
             return MemorySystem()
 
     @pytest.fixture
@@ -55,10 +57,10 @@ class TestMemorySystem:
                             {
                                 "thought": "Click login button",
                                 "action": "click",
-                                "target_element_description": "login button"
+                                "target_element_description": "login button",
                             }
-                        ]
-                    }
+                        ],
+                    },
                 }
             ],
             "facts": [
@@ -67,28 +69,32 @@ class TestMemorySystem:
                     "metadata": {
                         "content": "Login requires valid credentials",
                         "keywords": ["login", "credentials"],
-                        "source": "manual"
-                    }
+                        "source": "manual",
+                    },
                 }
-            ]
+            ],
         }
 
     @pytest.mark.unit
     def test_init(self, mock_storage, mock_ingestion, mock_retriever, mock_config):
         """Test MemorySystem initialization."""
-        with patch('gui_agent_memory.main.MemoryStorage', return_value=mock_storage), \
-             patch('gui_agent_memory.main.MemoryIngestion', return_value=mock_ingestion), \
-             patch('gui_agent_memory.main.MemoryRetriever', return_value=mock_retriever), \
-             patch('gui_agent_memory.main.get_config', return_value=mock_config):
-            
+        with (
+            patch("gui_agent_memory.main.MemoryStorage", return_value=mock_storage),
+            patch("gui_agent_memory.main.MemoryIngestion", return_value=mock_ingestion),
+            patch("gui_agent_memory.main.MemoryRetriever", return_value=mock_retriever),
+            patch("gui_agent_memory.main.get_config", return_value=mock_config),
+        ):
+
             memory_system = MemorySystem()
-            
+
             assert memory_system.storage == mock_storage
             assert memory_system.ingestion == mock_ingestion
             assert memory_system.retriever == mock_retriever
 
     @pytest.mark.unit
-    def test_retrieve_memories_success(self, memory_system, mock_retriever, sample_retrieval_results):
+    def test_retrieve_memories_success(
+        self, memory_system, mock_retriever, sample_retrieval_results
+    ):
         """Test successful memory retrieval."""
         # Arrange
         query = "How to login to application"
@@ -115,7 +121,7 @@ class TestMemorySystem:
             is_successful=True,
             source_task_id="task_123",
             task_description="Login to application",
-            app_name="TestApp"
+            app_name="TestApp",
         )
 
         # Assert
@@ -132,7 +138,7 @@ class TestMemorySystem:
         result = memory_system.add_fact(
             content="Python is a programming language",
             keywords=["python", "programming"],
-            source="manual"
+            source="manual",
         )
 
         # Assert

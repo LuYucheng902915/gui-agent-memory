@@ -20,7 +20,7 @@
 ## 📦 安装
 
 ### 前置条件
-- Python >= 3.8
+- Python >= 3.11
 - uv 包管理器
 
 ### 安装步骤
@@ -36,10 +36,7 @@ source .venv/bin/activate  # Linux/Mac
 # 或 .venv\Scripts\activate  # Windows
 
 # 安装项目依赖
-uv pip install -e .
-
-# 安装开发依赖
-uv pip install -e ".[dev]"
+uv sync
 ```
 
 ## 🧪 测试
@@ -79,7 +76,7 @@ def main():
             ],
             "outcome": "成功打开Finder应用"
         }
-        
+
         # 使用 learn_from_task 方法存储经验
         # 在这个示例中，我们假设任务是成功的，并提供一个唯一的任务ID
         # 注意：raw_history 期望一个列表，我们将任务历史字典包装在列表中
@@ -106,7 +103,7 @@ if __name__ == "__main__":
 
 ## 🔗 在其他项目中使用
 
-如果您要在另一个项目中使用这个记忆包，推荐以下方式：
+如果要在另一个项目中使用这个记忆包，推荐以下方式：
 
 ### 方法1：本地可编辑安装（推荐）
 
@@ -130,11 +127,6 @@ uv pip install -e ./gui-agent-memory
 如果您的项目已推送到Git仓库，可以直接从URL安装：
 ```bash
 uv pip install git+https://github.com/your-username/gui-agent-memory.git
-```
-
-### 方法3：从PyPI安装（发布后）
-```bash
-uv pip install gui-agent-memory
 ```
 
 ## 📁 项目结构
@@ -171,18 +163,17 @@ mypy gui_agent_memory
 
 ### 提交前检查
 ```bash
-# 安装pre-commit钩子
+# 方案1：使用 pre-commit（需要网络）
 pre-commit install
-
-# 手动运行所有检查
 pre-commit run --all-files
-```
+
+# 方案2：网络问题时使用本地检查脚本
+./scripts/check.sh
 
 ## 📋 API 文档
 
 ### MemorySystem 类
 
-主要的记
 - `retrieve_memories(query: str, top_n: int = 3)` - 检索相关的经验和事实
 - `learn_from_task(raw_history: dict, is_successful: bool, source_task_id: str, ...)` - 从原始任务历史中学习并存储为经验
 - `add_fact(fact: dict)` - 存储一个结构化的事实记录

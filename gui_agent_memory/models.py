@@ -28,7 +28,7 @@ class ActionStep(BaseModel):
 class ExperienceRecord(BaseModel):
     """
     Model for storing operational experiences (episodic memory).
-    
+
     This represents a complete operational flow that the agent has learned,
     including both successful and failed experiences.
     """
@@ -49,7 +49,7 @@ class ExperienceRecord(BaseModel):
     is_successful: bool = Field(
         description="Whether this experience represents a successful task completion"
     )
-    
+
     # Metadata fields (reserved for future use in V1.0)
     usage_count: int = Field(
         default=0, description="Number of times this experience has been retrieved"
@@ -66,7 +66,7 @@ class ExperienceRecord(BaseModel):
 class FactRecord(BaseModel):
     """
     Model for storing semantic knowledge (declarative memory).
-    
+
     This represents objective facts and rules about operating systems,
     applications, or general domains.
     """
@@ -82,7 +82,7 @@ class FactRecord(BaseModel):
         default="manual",
         description="Source of this knowledge (e.g., 'manual', 'documentation', 'inference')",
     )
-    
+
     # Metadata fields (reserved for future use in V1.0)
     usage_count: int = Field(
         default=0, description="Number of times this fact has been retrieved"
@@ -119,9 +119,7 @@ class LearningRequest(BaseModel):
     is_successful: bool = Field(
         description="Whether the task was completed successfully"
     )
-    source_task_id: str = Field(
-        description="Unique identifier for the source task"
-    )
+    source_task_id: str = Field(description="Unique identifier for the source task")
     app_name: str = Field(
         default="", description="Name of the application being operated on"
     )
