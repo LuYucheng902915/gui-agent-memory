@@ -9,13 +9,13 @@
         "target_element_description": "Chrome address bar"
       },
       {
-        "thought": "Enter email address for authentication",  
+        "thought": "Enter email address for authentication",
         "action": "type",
         "target_element_description": "Email input field"
       },
       {
         "thought": "Submit login credentials",
-        "action": "click", 
+        "action": "click",
         "target_element_description": "Sign in button"
       }
     ],
@@ -38,14 +38,14 @@
       "success": true
     },
     {
-      "timestamp": "2024-01-01T10:00:05Z", 
+      "timestamp": "2024-01-01T10:00:05Z",
       "action": "click",
       "target": "email_input",
       "success": true
     },
     {
       "timestamp": "2024-01-01T10:00:10Z",
-      "action": "type", 
+      "action": "type",
       "target": "email_input",
       "text": "user@example.com",
       "success": true
@@ -53,7 +53,7 @@
     {
       "timestamp": "2024-01-01T10:00:15Z",
       "action": "click",
-      "target": "next_button", 
+      "target": "next_button",
       "success": true
     },
     {
@@ -78,7 +78,7 @@
         "thought": "need to login first"
       },
       {
-        "action": "type", 
+        "action": "type",
         "target": "email_field",
         "text": "user@example.com"
       }

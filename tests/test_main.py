@@ -84,7 +84,6 @@ class TestMemorySystem:
             patch("gui_agent_memory.main.MemoryRetriever", return_value=mock_retriever),
             patch("gui_agent_memory.main.get_config", return_value=mock_config),
         ):
-
             memory_system = MemorySystem()
 
             assert memory_system.storage == mock_storage
@@ -177,7 +176,11 @@ class TestMemorySystemIntegration:
 
     def test_full_learning_and_retrieval_workflow(self, memory_system):
         """Test complete workflow: learn from task -> retrieve memories."""
-        from gui_agent_memory.models import RetrievalResult, ExperienceRecord, FactRecord
+        from gui_agent_memory.models import (
+            ExperienceRecord,
+            FactRecord,
+            RetrievalResult,
+        )
 
         # Step 1: Learn from a task
         raw_history = [
@@ -228,7 +231,10 @@ class TestMemorySystemIntegration:
 
     def test_add_fact_and_retrieve_workflow(self, memory_system):
         """Test workflow: add fact -> retrieve related information."""
-        from gui_agent_memory.models import RetrievalResult, ExperienceRecord, FactRecord
+        from gui_agent_memory.models import (
+            FactRecord,
+            RetrievalResult,
+        )
 
         # Step 1: Add a fact
         memory_system._mock_ingestion.add_fact.return_value = (
@@ -238,7 +244,7 @@ class TestMemorySystemIntegration:
         fact_result = memory_system.add_fact(
             "OAuth 2.0 is an authorization framework",
             ["oauth", "authorization", "security"],
-            "documentation"
+            "documentation",
         )
 
         # Verify fact addition
@@ -246,7 +252,7 @@ class TestMemorySystemIntegration:
         memory_system._mock_ingestion.add_fact.assert_called_once_with(
             "OAuth 2.0 is an authorization framework",
             ["oauth", "authorization", "security"],
-            "documentation"
+            "documentation",
         )
 
         # Step 2: Retrieve related information
@@ -324,7 +330,9 @@ class TestMemorySystemEdgeCases:
 
     def test_extreme_top_n_values(self, memory_system):
         """Test retrieval with extreme top_n values."""
-        from gui_agent_memory.models import RetrievalResult, ExperienceRecord, FactRecord
+        from gui_agent_memory.models import (
+            RetrievalResult,
+        )
 
         query = "test query"
         mock_result = Mock(spec=RetrievalResult)

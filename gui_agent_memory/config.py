@@ -9,7 +9,6 @@ This module handles:
 """
 
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -113,7 +112,9 @@ class MemoryConfig:
             )
 
         except Exception as e:
-            raise ConfigurationError(f"Failed to initialize AI service clients: {e}")
+            raise ConfigurationError(
+                f"Failed to initialize AI service clients: {e}"
+            ) from e
 
     def get_embedding_client(self) -> OpenAI:
         """Get the embedding client (Gitee AI)."""
@@ -150,11 +151,11 @@ class MemoryConfig:
 
             return True
         except Exception as e:
-            raise ConfigurationError(f"Configuration validation failed: {e}")
+            raise ConfigurationError(f"Configuration validation failed: {e}") from e
 
 
 # Global configuration instance
-_config: Optional[MemoryConfig] = None
+_config: MemoryConfig | None = None
 
 
 def get_config() -> MemoryConfig:

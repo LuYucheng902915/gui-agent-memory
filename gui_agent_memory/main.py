@@ -5,7 +5,7 @@ This module provides the high-level API for interacting with the memory system,
 including retrieval, learning, and knowledge management operations.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 from .config import ConfigurationError, get_config
 from .ingestion import IngestionError, MemoryIngestion
@@ -49,7 +49,7 @@ class MemorySystem:
         except ConfigurationError:
             raise  # Re-raise configuration errors directly
         except Exception as e:
-            raise MemorySystemError(f"Failed to initialize memory system: {e}")
+            raise MemorySystemError(f"Failed to initialize memory system: {e}") from e
 
     def retrieve_memories(self, query: str, top_n: int = 3) -> RetrievalResult:
         """
@@ -82,11 +82,11 @@ class MemorySystem:
         try:
             return self.retriever.retrieve_memories(query, top_n)
         except RetrievalError as e:
-            raise MemorySystemError(f"Memory retrieval failed: {e}")
+            raise MemorySystemError(f"Memory retrieval failed: {e}") from e
 
     def learn_from_task(
         self,
-        raw_history: List[Dict[str, Any]],
+        raw_history: list[dict[str, Any]],
         is_successful: bool,
         source_task_id: str,
         app_name: str = "",
@@ -140,7 +140,7 @@ class MemorySystem:
                 task_description=task_description,
             )
         except IngestionError as e:
-            raise MemorySystemError(f"Learning from task failed: {e}")
+            raise MemorySystemError(f"Learning from task failed: {e}") from e
 
     def add_experience(self, experience: ExperienceRecord) -> str:
         """
@@ -182,10 +182,10 @@ class MemorySystem:
         try:
             return self.ingestion.add_experience(experience)
         except IngestionError as e:
-            raise MemorySystemError(f"Adding experience failed: {e}")
+            raise MemorySystemError(f"Adding experience failed: {e}") from e
 
     def add_fact(
-        self, content: str, keywords: List[str], source: str = "manual"
+        self, content: str, keywords: list[str], source: str = "manual"
     ) -> str:
         """
         Add a semantic fact to the knowledge base.
@@ -219,9 +219,9 @@ class MemorySystem:
         try:
             return self.ingestion.add_fact(content, keywords, source)
         except IngestionError as e:
-            raise MemorySystemError(f"Adding fact failed: {e}")
+            raise MemorySystemError(f"Adding fact failed: {e}") from e
 
-    def batch_add_facts(self, facts_data: List[Dict[str, Any]]) -> List[str]:
+    def batch_add_facts(self, facts_data: list[dict[str, Any]]) -> list[str]:
         """
         Add multiple facts in batch for efficient bulk operations.
 
@@ -264,11 +264,11 @@ class MemorySystem:
         try:
             return self.ingestion.batch_add_facts(facts_data)
         except IngestionError as e:
-            raise MemorySystemError(f"Batch adding facts failed: {e}")
+            raise MemorySystemError(f"Batch adding facts failed: {e}") from e
 
     def get_similar_experiences(
         self, task_description: str, top_n: int = 5
-    ) -> List[ExperienceRecord]:
+    ) -> list[ExperienceRecord]:
         """
         Get experiences similar to a given task description.
 
@@ -288,9 +288,9 @@ class MemorySystem:
         try:
             return self.retriever.get_similar_experiences(task_description, top_n)
         except RetrievalError as e:
-            raise MemorySystemError(f"Getting similar experiences failed: {e}")
+            raise MemorySystemError(f"Getting similar experiences failed: {e}") from e
 
-    def get_related_facts(self, topic: str, top_n: int = 5) -> List[FactRecord]:
+    def get_related_facts(self, topic: str, top_n: int = 5) -> list[FactRecord]:
         """
         Get facts related to a specific topic.
 
@@ -310,9 +310,9 @@ class MemorySystem:
         try:
             return self.retriever.get_related_facts(topic, top_n)
         except RetrievalError as e:
-            raise MemorySystemError(f"Getting related facts failed: {e}")
+            raise MemorySystemError(f"Getting related facts failed: {e}") from e
 
-    def get_system_stats(self) -> Dict[str, Any]:
+    def get_system_stats(self) -> dict[str, Any]:
         """
         Get statistics about the memory system.
 
@@ -336,7 +336,7 @@ class MemorySystem:
                 "version": "1.0.0",
             }
         except StorageError as e:
-            raise MemorySystemError(f"Getting system stats failed: {e}")
+            raise MemorySystemError(f"Getting system stats failed: {e}") from e
 
     def validate_system(self) -> bool:
         """
@@ -358,7 +358,7 @@ class MemorySystem:
             return True
 
         except (ConfigurationError, StorageError) as e:
-            raise MemorySystemError(f"System validation failed: {e}")
+            raise MemorySystemError(f"System validation failed: {e}") from e
 
     def clear_all_memories(self) -> str:
         """
@@ -376,7 +376,7 @@ class MemorySystem:
             self.storage.clear_collections()
             return "Successfully cleared all memories from the system"
         except StorageError as e:
-            raise MemorySystemError(f"Clearing memories failed: {e}")
+            raise MemorySystemError(f"Clearing memories failed: {e}") from e
 
 
 # Convenience function for quick initialization

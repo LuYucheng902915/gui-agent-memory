@@ -15,7 +15,7 @@
 - ✅ 支持中文文本处理(jieba分词)
 - ✅ 完整的测试覆盖
 - ✅ 类型安全(mypy)
-- ✅ 代码格式化(black + isort)
+- ✅ 现代化代码质量管理(ruff)
 
 ## 📦 安装
 
@@ -122,7 +122,7 @@ your-main-project/
 uv pip install -e ./gui-agent-memory
 ```
 
-### 方法2：通过Git仓库安装
+### 方法2：通过Git仓库安装（未测试）
 
 如果您的项目已推送到Git仓库，可以直接从URL安装：
 ```bash
@@ -151,24 +151,52 @@ gui-agent-memory/
 
 ## 🛠️ 开发
 
-### 代码格式化
-```bash
-# 格式化代码
-black gui_agent_memory tests
-isort gui_agent_memory tests
+### 代码质量管理
 
-# 类型检查
-mypy gui_agent_memory
+#### 🔧 开发时快速格式化（主动修复）
+```bash
+# 格式化代码（直接修改文件）
+uv run ruff format gui_agent_memory tests
+
+# 修复代码问题（导入排序、代码风格等）
+uv run ruff check --fix gui_agent_memory tests
+
+# 类型检查（仅检查，不修改）
+uv run mypy gui_agent_memory tests
 ```
 
-### 提交前检查
+#### 🛡️ 提交时自动检查（推荐）
 ```bash
-# 方案1：使用 pre-commit（需要网络）
-pre-commit install
-pre-commit run --all-files
+# 一次性安装 pre-commit 钩子（需要网络）
+uv run pre-commit install
 
-# 方案2：网络问题时使用本地检查脚本
+# 手动运行所有检查（测试钩子）
+uv run pre-commit run --all-files
+
+# 之后每次 git commit 都会自动运行检查
+```
+
+**Pre-commit 的优势：**
+- ✅ 自动在每次提交时运行检查
+- ✅ 包含额外的文件质量检查（空白字符、大文件等）
+- ✅ 确保团队代码标准统一
+- ✅ 在提交前阻止问题代码
+
+#### 🔄 离线备用方案
+```bash
+# 网络问题时使用本地检查脚本
 ./scripts/check.sh
+```
+
+**使用建议：**
+1. **日常开发**：使用 Ruff 快速格式化和修复代码
+2. **提交代码**：依赖 pre-commit 自动检查（推荐）
+3. **网络受限**：使用本地检查脚本验证代码质量
+
+**工具升级说明：**
+- ✅ **Ruff**：替代 Black + isort + flake8，更快更现代
+- ✅ **Mypy**：继续用于类型检查
+- ✅ **统一配置**：所有设置在 pyproject.toml 中
 
 ## 📋 API 文档
 
@@ -183,19 +211,6 @@ pre-commit run --all-files
 ## 🤝 贡献
 
 欢迎提交问题和拉取请求！
-
-请确保在提交前运行测试和代码格式化：
-```bash
-# 格式化代码
-uv run black .
-uv run isort .
-
-# 运行类型检查
-uv run mypy .
-
-# 运行测试
-uv run pytest
-```
 
 ## 📄 许可证
 

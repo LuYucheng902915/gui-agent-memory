@@ -13,7 +13,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 
 import jieba
 
@@ -67,20 +67,20 @@ class MemoryIngestion:
             experience_prompt_path = os.path.join(
                 os.path.dirname(__file__), "prompts", "experience_distillation.txt"
             )
-            with open(experience_prompt_path, "r", encoding="utf-8") as f:
+            with open(experience_prompt_path, encoding="utf-8") as f:
                 self.experience_distillation_prompt = f.read()
 
             # Load keyword extraction prompt
             keyword_prompt_path = os.path.join(
                 os.path.dirname(__file__), "prompts", "keyword_extraction.txt"
             )
-            with open(keyword_prompt_path, "r", encoding="utf-8") as f:
+            with open(keyword_prompt_path, encoding="utf-8") as f:
                 self.keyword_extraction_prompt = f.read()
 
         except Exception as e:
-            raise IngestionError(f"Failed to load prompt templates: {e}")
+            raise IngestionError(f"Failed to load prompt templates: {e}") from e
 
-    def _generate_embedding(self, text: str) -> List[float]:
+    def _generate_embedding(self, text: str) -> list[float]:
         """
         Generate embedding for the given text using Gitee AI.
 
@@ -100,9 +100,9 @@ class MemoryIngestion:
             )
             return response.data[0].embedding
         except Exception as e:
-            raise IngestionError(f"Failed to generate embedding: {e}")
+            raise IngestionError(f"Failed to generate embedding: {e}") from e
 
-    def _extract_keywords_with_jieba(self, text: str) -> List[str]:
+    def _extract_keywords_with_jieba(self, text: str) -> list[str]:
         """
         Extract keywords from text using jieba tokenizer.
 
@@ -151,7 +151,7 @@ class MemoryIngestion:
 
         return unique_keywords[:10]  # Limit to 10 keywords
 
-    def _extract_keywords_with_llm(self, query: str) -> List[str]:
+    def _extract_keywords_with_llm(self, query: str) -> list[str]:
         """
         Extract keywords using LLM for better quality.
 
@@ -190,7 +190,7 @@ class MemoryIngestion:
 
     def _distill_experience_with_llm(
         self, learning_request: LearningRequest
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Use LLM to distill raw history into structured experience.
 
@@ -243,11 +243,11 @@ class MemoryIngestion:
             return distilled_data
 
         except Exception as e:
-            raise IngestionError(f"Failed to distill experience with LLM: {e}")
+            raise IngestionError(f"Failed to distill experience with LLM: {e}") from e
 
     def learn_from_task(
         self,
-        raw_history: List[Dict[str, Any]],
+        raw_history: list[dict[str, Any]],
         is_successful: bool,
         source_task_id: str,
         app_name: str = "",
@@ -337,7 +337,9 @@ class MemoryIngestion:
 
             self.logger.error(f"Failed to learn from task: {json.dumps(failure_data)}")
 
-            raise IngestionError(f"Failed to learn from task '{source_task_id}': {e}")
+            raise IngestionError(
+                f"Failed to learn from task '{source_task_id}': {e}"
+            ) from e
 
     def add_experience(self, experience: ExperienceRecord) -> str:
         """
@@ -366,10 +368,10 @@ class MemoryIngestion:
             return f"Successfully added experience '{experience.source_task_id}'. Record ID: {record_ids[0]}"
 
         except Exception as e:
-            raise IngestionError(f"Failed to add experience: {e}")
+            raise IngestionError(f"Failed to add experience: {e}") from e
 
     def add_fact(
-        self, content: str, keywords: List[str], source: str = "manual"
+        self, content: str, keywords: list[str], source: str = "manual"
     ) -> str:
         """
         Add a semantic fact to the knowledge base.
@@ -398,9 +400,9 @@ class MemoryIngestion:
             return f"Successfully added fact. Record ID: {record_ids[0]}"
 
         except Exception as e:
-            raise IngestionError(f"Failed to add fact: {e}")
+            raise IngestionError(f"Failed to add fact: {e}") from e
 
-    def batch_add_facts(self, facts_data: List[Dict[str, Any]]) -> List[str]:
+    def batch_add_facts(self, facts_data: list[dict[str, Any]]) -> list[str]:
         """
         Add multiple facts in batch.
 
@@ -435,4 +437,4 @@ class MemoryIngestion:
             return [f"Successfully added fact. Record ID: {rid}" for rid in record_ids]
 
         except Exception as e:
-            raise IngestionError(f"Failed to batch add facts: {e}")
+            raise IngestionError(f"Failed to batch add facts: {e}") from e

@@ -249,9 +249,7 @@ class TestMemoryIngestion:
         from gui_agent_memory.ingestion import IngestionError
 
         with (
-            patch(
-                "gui_agent_memory.ingestion.get_config", return_value=mock_config
-            ),
+            patch("gui_agent_memory.ingestion.get_config", return_value=mock_config),
             patch(
                 "gui_agent_memory.ingestion.MemoryStorage",
                 return_value=mock_storage,
@@ -259,6 +257,7 @@ class TestMemoryIngestion:
         ):
             # Mock the prompt file loading specifically to fail
             original_open = open
+
             def mock_open_func(path, *args, **kwargs):
                 if "prompts/" in str(path):
                     raise FileNotFoundError("Prompt file not found")
@@ -432,9 +431,21 @@ class TestMemoryIngestion:
     def test_batch_add_facts(self, ingestion, mock_config):
         """Test batch addition of multiple facts."""
         facts_data = [
-            {"content": "Python is interpreted", "keywords": ["python", "interpreted"], "source": "doc1"},
-            {"content": "JavaScript runs in browsers", "keywords": ["javascript", "browser"], "source": "doc2"},
-            {"content": "SQL manages databases", "keywords": ["sql", "database"], "source": "doc3"},
+            {
+                "content": "Python is interpreted",
+                "keywords": ["python", "interpreted"],
+                "source": "doc1",
+            },
+            {
+                "content": "JavaScript runs in browsers",
+                "keywords": ["javascript", "browser"],
+                "source": "doc2",
+            },
+            {
+                "content": "SQL manages databases",
+                "keywords": ["sql", "database"],
+                "source": "doc3",
+            },
         ]
 
         # Mock embedding generation for each fact

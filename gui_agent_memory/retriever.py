@@ -9,7 +9,7 @@ This module handles:
 """
 
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import jieba
 import requests
@@ -36,7 +36,7 @@ class MemoryRetriever:
         self.config = get_config()
         self.storage = MemoryStorage()
 
-    def _generate_query_embedding(self, query: str) -> List[float]:
+    def _generate_query_embedding(self, query: str) -> list[float]:
         """
         Generate embedding for the query text.
 
@@ -56,9 +56,9 @@ class MemoryRetriever:
             )
             return response.data[0].embedding
         except Exception as e:
-            raise RetrievalError(f"Failed to generate query embedding: {e}")
+            raise RetrievalError(f"Failed to generate query embedding: {e}") from e
 
-    def _extract_query_keywords(self, query: str) -> List[str]:
+    def _extract_query_keywords(self, query: str) -> list[str]:
         """
         Extract keywords from query using jieba tokenization.
 
@@ -123,7 +123,7 @@ class MemoryRetriever:
 
         return unique_keywords
 
-    def _extract_keywords(self, query: str) -> List[str]:
+    def _extract_keywords(self, query: str) -> list[str]:
         """
         Alias for _extract_query_keywords for backward compatibility.
 
@@ -135,7 +135,7 @@ class MemoryRetriever:
         """
         return self._extract_query_keywords(query)
 
-    def _build_keyword_filter(self, keywords: List[str]) -> Dict[str, Any]:
+    def _build_keyword_filter(self, keywords: list[str]) -> dict[str, Any]:
         """
         Build ChromaDB filter for keyword-based search.
 
@@ -154,8 +154,8 @@ class MemoryRetriever:
         return {}
 
     def _vector_search_experiences(
-        self, query_embedding: List[float], top_k: int = 20
-    ) -> List[Dict[str, Any]]:
+        self, query_embedding: list[float], top_k: int = 20
+    ) -> list[dict[str, Any]]:
         """
         Perform vector similarity search on experiences.
 
@@ -188,11 +188,11 @@ class MemoryRetriever:
             return experiences
 
         except Exception as e:
-            raise RetrievalError(f"Vector search for experiences failed: {e}")
+            raise RetrievalError(f"Vector search for experiences failed: {e}") from e
 
     def _vector_search_facts(
-        self, query_embedding: List[float], top_k: int = 20
-    ) -> List[Dict[str, Any]]:
+        self, query_embedding: list[float], top_k: int = 20
+    ) -> list[dict[str, Any]]:
         """
         Perform vector similarity search on facts.
 
@@ -225,11 +225,11 @@ class MemoryRetriever:
             return facts
 
         except Exception as e:
-            raise RetrievalError(f"Vector search for facts failed: {e}")
+            raise RetrievalError(f"Vector search for facts failed: {e}") from e
 
     def _keyword_search_experiences(
-        self, keywords: List[str], top_k: int = 20
-    ) -> List[Dict[str, Any]]:
+        self, keywords: list[str], top_k: int = 20
+    ) -> list[dict[str, Any]]:
         """
         Perform keyword-based search on experiences.
 
@@ -273,11 +273,11 @@ class MemoryRetriever:
             return experiences
 
         except Exception as e:
-            raise RetrievalError(f"Keyword search for experiences failed: {e}")
+            raise RetrievalError(f"Keyword search for experiences failed: {e}") from e
 
     def _keyword_search_facts(
-        self, keywords: List[str], top_k: int = 20
-    ) -> List[Dict[str, Any]]:
+        self, keywords: list[str], top_k: int = 20
+    ) -> list[dict[str, Any]]:
         """
         Perform keyword-based search on facts.
 
@@ -321,13 +321,13 @@ class MemoryRetriever:
             return facts
 
         except Exception as e:
-            raise RetrievalError(f"Keyword search for facts failed: {e}")
+            raise RetrievalError(f"Keyword search for facts failed: {e}") from e
 
     def _merge_and_deduplicate_results(
         self,
-        vector_results: List[Dict[str, Any]],
-        keyword_results: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+        vector_results: list[dict[str, Any]],
+        keyword_results: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         """
         Merge vector and keyword search results, removing duplicates.
 
@@ -358,8 +358,8 @@ class MemoryRetriever:
         return merged_results
 
     def _rerank_results(
-        self, query: str, candidates: List[Dict[str, Any]], top_n: int = 10
-    ) -> List[Dict[str, Any]]:
+        self, query: str, candidates: list[dict[str, Any]], top_n: int = 10
+    ) -> list[dict[str, Any]]:
         """
         Re-rank candidate results using the reranker model.
 
@@ -431,8 +431,8 @@ class MemoryRetriever:
             return candidates[:top_n]
 
     def _convert_results_to_models(
-        self, results: List[Dict[str, Any]]
-    ) -> Tuple[List[ExperienceRecord], List[FactRecord]]:
+        self, results: list[dict[str, Any]]
+    ) -> tuple[list[ExperienceRecord], list[FactRecord]]:
         """
         Convert search results back to Pydantic models.
 
@@ -559,11 +559,11 @@ class MemoryRetriever:
             return result
 
         except Exception as e:
-            raise RetrievalError(f"Memory retrieval failed: {e}")
+            raise RetrievalError(f"Memory retrieval failed: {e}") from e
 
     def get_similar_experiences(
         self, task_description: str, top_n: int = 5
-    ) -> List[ExperienceRecord]:
+    ) -> list[ExperienceRecord]:
         """
         Get experiences similar to a given task description.
 
@@ -582,9 +582,9 @@ class MemoryRetriever:
             return experiences
 
         except Exception as e:
-            raise RetrievalError(f"Failed to get similar experiences: {e}")
+            raise RetrievalError(f"Failed to get similar experiences: {e}") from e
 
-    def get_related_facts(self, topic: str, top_n: int = 5) -> List[FactRecord]:
+    def get_related_facts(self, topic: str, top_n: int = 5) -> list[FactRecord]:
         """
         Get facts related to a specific topic.
 
@@ -603,4 +603,4 @@ class MemoryRetriever:
             return facts
 
         except Exception as e:
-            raise RetrievalError(f"Failed to get related facts: {e}")
+            raise RetrievalError(f"Failed to get related facts: {e}") from e

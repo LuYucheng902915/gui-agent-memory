@@ -10,7 +10,7 @@ This module handles:
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # Fix SQLite version compatibility for ChromaDB
 try:
@@ -63,7 +63,7 @@ class MemoryStorage:
                 ),
             )
         except Exception as e:
-            raise StorageError(f"Failed to initialize ChromaDB client: {e}")
+            raise StorageError(f"Failed to initialize ChromaDB client: {e}") from e
 
     def _init_collections(self) -> None:
         """Initialize or get existing collections."""
@@ -86,7 +86,7 @@ class MemoryStorage:
             )
 
         except Exception as e:
-            raise StorageError(f"Failed to initialize collections: {e}")
+            raise StorageError(f"Failed to initialize collections: {e}") from e
 
     def get_collection(self, collection_name: str) -> chromadb.Collection:
         """
@@ -109,11 +109,13 @@ class MemoryStorage:
             else:
                 raise StorageError(f"Unknown collection: {collection_name}")
         except Exception as e:
-            raise StorageError(f"Failed to get collection {collection_name}: {e}")
+            raise StorageError(
+                f"Failed to get collection {collection_name}: {e}"
+            ) from e
 
     def add_experiences(
-        self, experiences: List[ExperienceRecord], embeddings: List[List[float]]
-    ) -> List[str]:
+        self, experiences: list[ExperienceRecord], embeddings: list[list[float]]
+    ) -> list[str]:
         """
         Add experience records to the experiential memories collection.
 
@@ -166,11 +168,11 @@ class MemoryStorage:
             return ids
 
         except Exception as e:
-            raise StorageError(f"Failed to add experiences: {e}")
+            raise StorageError(f"Failed to add experiences: {e}") from e
 
     def add_facts(
-        self, facts: List[FactRecord], embeddings: List[List[float]]
-    ) -> List[str]:
+        self, facts: list[FactRecord], embeddings: list[list[float]]
+    ) -> list[str]:
         """
         Add fact records to the declarative memories collection.
 
@@ -219,15 +221,15 @@ class MemoryStorage:
             return ids
 
         except Exception as e:
-            raise StorageError(f"Failed to add facts: {e}")
+            raise StorageError(f"Failed to add facts: {e}") from e
 
     def query_experiences(
         self,
-        query_embeddings: Optional[List[List[float]]] = None,
-        query_texts: Optional[List[str]] = None,
-        where: Optional[Dict[str, Any]] = None,
+        query_embeddings: list[list[float]] | None = None,
+        query_texts: list[str] | None = None,
+        where: dict[str, Any] | None = None,
         n_results: int = 10,
-    ) -> Dict[str, List[Any]]:
+    ) -> dict[str, list[Any]]:
         """
         Query the experiential memories collection.
 
@@ -252,15 +254,15 @@ class MemoryStorage:
             )
             return results
         except Exception as e:
-            raise StorageError(f"Failed to query experiences: {e}")
+            raise StorageError(f"Failed to query experiences: {e}") from e
 
     def query_facts(
         self,
-        query_embeddings: Optional[List[List[float]]] = None,
-        query_texts: Optional[List[str]] = None,
-        where: Optional[Dict[str, Any]] = None,
+        query_embeddings: list[list[float]] | None = None,
+        query_texts: list[str] | None = None,
+        where: dict[str, Any] | None = None,
         n_results: int = 10,
-    ) -> Dict[str, List[Any]]:
+    ) -> dict[str, list[Any]]:
         """
         Query the declarative memories collection.
 
@@ -285,7 +287,7 @@ class MemoryStorage:
             )
             return results
         except Exception as e:
-            raise StorageError(f"Failed to query facts: {e}")
+            raise StorageError(f"Failed to query facts: {e}") from e
 
     def experience_exists(self, source_task_id: str) -> bool:
         """
@@ -303,7 +305,7 @@ class MemoryStorage:
         except Exception:
             return False
 
-    def get_collection_stats(self) -> Dict[str, int]:
+    def get_collection_stats(self) -> dict[str, int]:
         """
         Get statistics about the collections.
 
@@ -320,7 +322,7 @@ class MemoryStorage:
                 "total": experiential_count + declarative_count,
             }
         except Exception as e:
-            raise StorageError(f"Failed to get collection stats: {e}")
+            raise StorageError(f"Failed to get collection stats: {e}") from e
 
     def clear_collections(self) -> None:
         """Clear all data from both collections (for testing purposes)."""
@@ -330,4 +332,4 @@ class MemoryStorage:
             self.client.delete_collection(self.config.declarative_collection_name)
             self._init_collections()
         except Exception as e:
-            raise StorageError(f"Failed to clear collections: {e}")
+            raise StorageError(f"Failed to clear collections: {e}") from e

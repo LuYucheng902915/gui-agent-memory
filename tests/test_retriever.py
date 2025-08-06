@@ -143,9 +143,7 @@ class TestMemoryRetriever:
         mock_rerank_response = Mock()
         mock_rerank_response.choices = [Mock()]
         mock_rerank_response.choices[0].message.content = "[0]"
-        mock_config.get_reranker_client.return_value.chat.completions.create.return_value = (
-            mock_rerank_response
-        )
+        mock_config.get_reranker_client.return_value.chat.completions.create.return_value = mock_rerank_response
 
         # Act
         result = retriever.retrieve_memories(query, top_n=1)
@@ -237,6 +235,7 @@ class TestMemoryRetriever:
 
         # Mock API failure
         import requests
+
         mock_post.side_effect = requests.RequestException("API error")
         mock_config.get_reranker_config.return_value = {
             "base_url": "https://test-reranker.com",
@@ -331,7 +330,9 @@ class TestMemoryRetriever:
         }
 
         # Mock reranking (disable for simplicity) - fixed parameter order
-        with patch.object(retriever, "_rerank_results", side_effect=lambda q, x, top_n=10: x):
+        with patch.object(
+            retriever, "_rerank_results", side_effect=lambda q, x, top_n=10: x
+        ):
             result = retriever.retrieve_memories(query, top_n=1)
 
         # Verify comprehensive result
@@ -443,7 +444,9 @@ class TestMemoryRetriever:
         assert len(result.experiences) == 0
         assert len(result.facts) == 0
 
-    def test_retrieve_memories_negative_top_n(self, retriever, mock_config, mock_storage):
+    def test_retrieve_memories_negative_top_n(
+        self, retriever, mock_config, mock_storage
+    ):
         """Test retrieval with negative top_n."""
         query = "Test query"
 

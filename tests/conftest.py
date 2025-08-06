@@ -80,7 +80,7 @@ def api_responses():
     responses_path = os.path.join(
         os.path.dirname(__file__), "mocks", "api_responses.json"
     )
-    with open(responses_path, "r") as f:
+    with open(responses_path) as f:
         return json.load(f)
 
 
@@ -90,7 +90,7 @@ def test_fixtures():
     fixtures_path = os.path.join(
         os.path.dirname(__file__), "mocks", "test_fixtures.json"
     )
-    with open(fixtures_path, "r") as f:
+    with open(fixtures_path) as f:
         return json.load(f)
 
 

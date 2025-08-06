@@ -7,7 +7,7 @@ This module defines the core data structures for both types of memories:
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -36,11 +36,11 @@ class ExperienceRecord(BaseModel):
     task_description: str = Field(
         description="Description of the task this experience relates to"
     )
-    keywords: List[str] = Field(
+    keywords: list[str] = Field(
         default_factory=list,
         description="Keywords for hybrid retrieval, prioritizing app names and features",
     )
-    action_flow: List[ActionStep] = Field(
+    action_flow: list[ActionStep] = Field(
         description="Complete, ordered list of action steps to complete the task"
     )
     preconditions: str = Field(
@@ -74,7 +74,7 @@ class FactRecord(BaseModel):
     content: str = Field(
         description="The core content of the fact or knowledge, used for vector retrieval"
     )
-    keywords: List[str] = Field(
+    keywords: list[str] = Field(
         default_factory=list,
         description="Keywords for hybrid retrieval, focusing on domain and application terms",
     )
@@ -98,10 +98,10 @@ class RetrievalResult(BaseModel):
     Model for structured retrieval results returned by the memory system.
     """
 
-    experiences: List[ExperienceRecord] = Field(
+    experiences: list[ExperienceRecord] = Field(
         default_factory=list, description="Retrieved operational experiences"
     )
-    facts: List[FactRecord] = Field(
+    facts: list[FactRecord] = Field(
         default_factory=list, description="Retrieved semantic facts"
     )
     query: str = Field(description="The original query used for retrieval")
@@ -113,7 +113,7 @@ class LearningRequest(BaseModel):
     Model for requests to learn from task execution history.
     """
 
-    raw_history: List[Dict[str, Any]] = Field(
+    raw_history: list[dict[str, Any]] = Field(
         description="Raw operational history from task execution"
     )
     is_successful: bool = Field(
