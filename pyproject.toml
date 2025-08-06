@@ -28,7 +28,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "httpx>=0.24.0",
     "typing-extensions>=4.5.0",
-    "pysqlite3-binary>=0.5.4",
+    "pysqlite3-binary>=0.5.4; sys_platform != 'win32'",
 ]
 
 [dependency-groups]
@@ -110,6 +110,7 @@ python_functions = "test_*"
 addopts = "-v --tb=short --strict-markers"
 filterwarnings = [
     "ignore::DeprecationWarning:jieba.*",
+    "ignore:invalid escape sequence:DeprecationWarning:jieba.*",
 ]
 markers = [
     "unit: marks tests as unit tests",

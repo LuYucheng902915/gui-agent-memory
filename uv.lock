@@ -473,7 +473,7 @@ dependencies = [
     { name = "jieba" },
     { name = "openai" },
     { name = "pydantic" },
-    { name = "pysqlite3-binary" },
+    { name = "pysqlite3-binary", marker = "sys_platform != 'win32'" },
     { name = "python-dotenv" },
     { name = "typing-extensions" },
 ]
@@ -496,7 +496,7 @@ requires-dist = [
     { name = "jieba", specifier = ">=0.42.1" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pysqlite3-binary", specifier = ">=0.5.4" },
+    { name = "pysqlite3-binary", marker = "sys_platform != 'win32'", specifier = ">=0.5.4" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "typing-extensions", specifier = ">=4.5.0" },
 ]

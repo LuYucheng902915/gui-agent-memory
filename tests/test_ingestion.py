@@ -4,6 +4,7 @@ Tests experience learning and knowledge ingestion functionality.
 """
 
 import json
+import os
 from unittest.mock import Mock, mock_open, patch
 
 import pytest
@@ -259,7 +260,8 @@ class TestMemoryIngestion:
             original_open = open
 
             def mock_open_func(path, *args, **kwargs):
-                if "prompts/" in str(path):
+                # Use os.path.normpath to handle different path separators
+                if "prompts" in os.path.normpath(str(path)):
                     raise FileNotFoundError("Prompt file not found")
                 return original_open(path, *args, **kwargs)
 
