@@ -19,6 +19,9 @@ from .config import get_config
 from .models import ActionStep, ExperienceRecord, FactRecord, RetrievalResult
 from .storage import MemoryStorage
 
+# Module-level logger
+logger = logging.getLogger(__name__)
+
 
 class RetrievalError(Exception):
     """Exception raised for retrieval-related errors."""
@@ -155,6 +158,64 @@ class MemoryRetriever:
         # This is a temporary workaround - in production, consider using full-text search
         return {}
 
+    def _keyword_filter_experiences(self, keywords: list[str]) -> dict[str, Any]:
+        """
+        Perform keyword-based filtering on experiences collection.
+
+        Args:
+            keywords: List of keywords to filter by
+
+        Returns:
+            ChromaDB query results for experiences matching keywords
+        """
+        if not keywords:
+            return {}
+
+        try:
+            keyword_filter = self._build_keyword_filter(keywords)
+            if not keyword_filter:
+                return {}
+
+            result = self.storage.query_experiences(
+                query_texts=None,
+                where=keyword_filter,
+                n_results=50,  # Get a reasonable number for filtering
+            )
+            return result
+
+        except Exception as e:
+            self.logger.warning(f"Keyword filtering for experiences failed: {e}")
+            return {}
+
+    def _keyword_filter_facts(self, keywords: list[str]) -> dict[str, Any]:
+        """
+        Perform keyword-based filtering on facts collection.
+
+        Args:
+            keywords: List of keywords to filter by
+
+        Returns:
+            ChromaDB query results for facts matching keywords
+        """
+        if not keywords:
+            return {}
+
+        try:
+            keyword_filter = self._build_keyword_filter(keywords)
+            if not keyword_filter:
+                return {}
+
+            result = self.storage.query_facts(
+                query_texts=None,
+                where=keyword_filter,
+                n_results=50,  # Get a reasonable number for filtering
+            )
+            return result
+
+        except Exception as e:
+            self.logger.warning(f"Keyword filtering for facts failed: {e}")
+            return {}
+
     def _vector_search_experiences(
         self, query_embedding: list[float], top_k: int = 20
     ) -> list[dict[str, Any]]:
@@ -174,15 +235,34 @@ class MemoryRetriever:
             )
 
             # Convert ChromaDB results to standardized format
-            experiences = []
-            for i in range(len(results["ids"][0])):
+            experiences: list[dict[str, Any]] = []
+
+            # Validate results structure
+            if not all(key in results for key in ["ids", "documents", "metadatas"]):
+                raise RetrievalError("Malformed storage results: missing required keys")
+
+            if not results["ids"] or not results["ids"][0]:
+                return experiences  # Return empty list for no results
+
+            ids = results["ids"][0]
+            documents = results["documents"][0]
+            metadatas = results["metadatas"][0]
+            distances = (
+                results.get("distances", [[]])[0] if "distances" in results else []
+            )
+
+            # Check for length consistency
+            if not (len(ids) == len(documents) == len(metadatas)):
+                raise RetrievalError(
+                    "Malformed storage results: inconsistent array lengths"
+                )
+
+            for i in range(len(ids)):
                 experience_data = {
-                    "id": results["ids"][0][i],
-                    "document": results["documents"][0][i],
-                    "metadata": results["metadatas"][0][i],
-                    "distance": (
-                        results["distances"][0][i] if "distances" in results else 0.0
-                    ),
+                    "id": ids[i],
+                    "document": documents[i],
+                    "metadata": metadatas[i],
+                    "distance": distances[i] if i < len(distances) else 0.0,
                     "type": "experience",
                 }
                 experiences.append(experience_data)
@@ -190,7 +270,9 @@ class MemoryRetriever:
             return experiences
 
         except Exception as e:
-            raise RetrievalError(f"Vector search for experiences failed: {e}") from e
+            raise RetrievalError(
+                f"Failed to perform vector search on experiences: {e}"
+            ) from e
 
     def _vector_search_facts(
         self, query_embedding: list[float], top_k: int = 20
@@ -211,15 +293,34 @@ class MemoryRetriever:
             )
 
             # Convert ChromaDB results to standardized format
-            facts = []
-            for i in range(len(results["ids"][0])):
+            facts: list[dict[str, Any]] = []
+
+            # Validate results structure
+            if not all(key in results for key in ["ids", "documents", "metadatas"]):
+                raise RetrievalError("Malformed storage results: missing required keys")
+
+            if not results["ids"] or not results["ids"][0]:
+                return facts  # Return empty list for no results
+
+            ids = results["ids"][0]
+            documents = results["documents"][0]
+            metadatas = results["metadatas"][0]
+            distances = (
+                results.get("distances", [[]])[0] if "distances" in results else []
+            )
+
+            # Check for length consistency
+            if not (len(ids) == len(documents) == len(metadatas)):
+                raise RetrievalError(
+                    "Malformed storage results: inconsistent array lengths"
+                )
+
+            for i in range(len(ids)):
                 fact_data = {
-                    "id": results["ids"][0][i],
-                    "document": results["documents"][0][i],
-                    "metadata": results["metadatas"][0][i],
-                    "distance": (
-                        results["distances"][0][i] if "distances" in results else 0.0
-                    ),
+                    "id": ids[i],
+                    "document": documents[i],
+                    "metadata": metadatas[i],
+                    "distance": distances[i] if i < len(distances) else 0.0,
                     "type": "fact",
                 }
                 facts.append(fact_data)
@@ -227,7 +328,9 @@ class MemoryRetriever:
             return facts
 
         except Exception as e:
-            raise RetrievalError(f"Vector search for facts failed: {e}") from e
+            raise RetrievalError(
+                f"Failed to perform vector search on facts: {e}"
+            ) from e
 
     def _keyword_search_experiences(
         self, keywords: list[str], top_k: int = 20
@@ -432,6 +535,41 @@ class MemoryRetriever:
             self.logger.warning("Reranking failed, using original order: %s", e)
             return candidates[:top_n]
 
+    def _convert_to_memory_objects(
+        self, results: list[dict[str, Any]]
+    ) -> tuple[list[ExperienceRecord], list[FactRecord]]:
+        """
+        Convert search results back to Pydantic models.
+
+        Args:
+            results: List of search results with metadata
+
+        Returns:
+            Tuple of (experiences, facts) as Pydantic models
+
+        Raises:
+            RetrievalError: If conversion fails
+        """
+        return self._convert_results_to_models(results)
+
+    def _parse_keywords_from_metadata(self, metadata: dict[str, Any]) -> list[str]:
+        """
+        Parse keywords from metadata dictionary.
+
+        Args:
+            metadata: Metadata dictionary containing keywords
+
+        Returns:
+            List of keywords
+        """
+        keywords_str = metadata.get("keywords", "")
+        if isinstance(keywords_str, str):
+            return [k.strip() for k in keywords_str.split(",") if k.strip()]
+        elif isinstance(keywords_str, list):
+            return keywords_str
+        else:
+            return []
+
     def _convert_results_to_models(
         self, results: list[dict[str, Any]]
     ) -> tuple[list[ExperienceRecord], list[FactRecord]]:
@@ -446,6 +584,7 @@ class MemoryRetriever:
         """
         experiences = []
         facts = []
+        conversion_errors = []
 
         for result in results:
             try:
@@ -454,18 +593,19 @@ class MemoryRetriever:
                     metadata = result["metadata"]
 
                     # Parse action_flow back from JSON
-                    action_flow_data = json.loads(metadata.get("action_flow", "[]"))
-                    action_steps = [
-                        ActionStep(**step_data) for step_data in action_flow_data
-                    ]
+                    try:
+                        action_flow_data = json.loads(metadata.get("action_flow", "[]"))
+                        action_steps = [
+                            ActionStep(**step_data) for step_data in action_flow_data
+                        ]
+                    except json.JSONDecodeError as e:
+                        raise RetrievalError(
+                            f"Failed to parse action_flow JSON: {e}"
+                        ) from e
 
                     experience = ExperienceRecord(
                         task_description=result["document"],
-                        keywords=(
-                            metadata.get("keywords", "").split(",")
-                            if metadata.get("keywords")
-                            else []
-                        ),
+                        keywords=self._parse_keywords_from_metadata(metadata),
                         action_flow=action_steps,
                         preconditions=metadata.get("preconditions", ""),
                         is_successful=metadata.get("is_successful", True),
@@ -481,11 +621,7 @@ class MemoryRetriever:
 
                     fact = FactRecord(
                         content=result["document"],
-                        keywords=(
-                            metadata.get("keywords", "").split(",")
-                            if metadata.get("keywords")
-                            else []
-                        ),
+                        keywords=self._parse_keywords_from_metadata(metadata),
                         source=metadata.get("source", "unknown"),
                         usage_count=metadata.get("usage_count", 0),
                         last_used_at=metadata.get("last_used_at", ""),
@@ -493,8 +629,15 @@ class MemoryRetriever:
                     facts.append(fact)
 
             except Exception as e:
+                conversion_errors.append(str(e))
                 self.logger.warning("Failed to convert result to model: %s", e)
                 continue
+
+        # If we have results but no successful conversions, raise an error
+        if results and not experiences and not facts and conversion_errors:
+            raise RetrievalError(
+                f"All conversion attempts failed: {conversion_errors[0]}"
+            )
 
         return experiences, facts
 
@@ -579,7 +722,58 @@ class MemoryRetriever:
         except Exception as e:
             # Log the error but don't fail the retrieval
             self.logger.warning(f"Failed to update usage statistics: {e}")
+            logger.warning(f"Failed to update usage statistics: {e}")
             return reranked_experiences, reranked_facts
+
+    def _update_usage_stats(self, memory_ids: list[str]) -> None:
+        """
+        Update usage statistics for a list of memory IDs.
+
+        Args:
+            memory_ids: List of memory IDs to update
+
+        Note:
+            This method handles storage errors gracefully and logs them.
+        """
+        try:
+            # For simplicity, assume all are experiences - in practice this would
+            # need to identify the collection for each ID
+            if memory_ids:
+                self.storage.update_usage_stats(
+                    memory_ids, self.config.experiential_collection_name
+                )
+        except Exception as e:
+            # Handle storage errors gracefully and log them
+            logger.error(f"Failed to update usage stats for memories {memory_ids}: {e}")
+            self.logger.warning(f"Failed to update usage stats: {e}")
+
+    def _merge_search_results(
+        self,
+        experience_results: list[dict[str, Any]],
+        fact_results: list[dict[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """
+        Merge and sort search results from experiences and facts.
+
+        Args:
+            experience_results: List of experience search results
+            fact_results: List of fact search results
+            limit: Maximum number of results to return
+
+        Returns:
+            Merged and sorted results limited by the specified limit
+        """
+        # Combine all results
+        all_results = experience_results + fact_results
+
+        # Sort by score in descending order (highest scores first)
+        sorted_results = sorted(
+            all_results, key=lambda x: x.get("score", 0.0), reverse=True
+        )
+
+        # Apply limit
+        return sorted_results[:limit]
 
     def _perform_hybrid_search(
         self,
@@ -685,9 +879,14 @@ class MemoryRetriever:
             query_embedding = self._generate_query_embedding(task_description)
             vector_results = self._vector_search_experiences(query_embedding, top_n)
 
-            experiences, _ = self._convert_results_to_models(vector_results)
-            return experiences
+            try:
+                experiences, _ = self._convert_to_memory_objects(vector_results)
+                return experiences
+            except Exception as e:
+                raise RetrievalError(f"Failed to convert experiences: {e}") from e
 
+        except RetrievalError:
+            raise
         except Exception as e:
             raise RetrievalError(f"Failed to get similar experiences: {e}") from e
 
@@ -706,8 +905,13 @@ class MemoryRetriever:
             query_embedding = self._generate_query_embedding(topic)
             vector_results = self._vector_search_facts(query_embedding, top_n)
 
-            _, facts = self._convert_results_to_models(vector_results)
-            return facts
+            try:
+                _, facts = self._convert_to_memory_objects(vector_results)
+                return facts
+            except Exception as e:
+                raise RetrievalError(f"Failed to convert facts: {e}") from e
 
+        except RetrievalError:
+            raise
         except Exception as e:
             raise RetrievalError(f"Failed to get related facts: {e}") from e

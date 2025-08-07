@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from gui_agent_memory.main import MemorySystem
+from gui_agent_memory.main import MemorySystem, MemorySystemError, create_memory_system
 
 
 class TestMemorySystem:
@@ -343,3 +343,542 @@ class TestMemorySystemEdgeCases:
             memory_system._mock_retriever.retrieve_memories.assert_called_with(
                 query, top_n
             )
+
+    def test_zero_top_n(self, memory_system):
+        """Test retrieval with zero top_n value."""
+        from gui_agent_memory.models import RetrievalResult
+
+        query = "test query"
+        mock_result = Mock(spec=RetrievalResult)
+        memory_system._mock_retriever.retrieve_memories.return_value = mock_result
+
+        result = memory_system.retrieve_memories(query, top_n=0)
+        assert result == mock_result
+        memory_system._mock_retriever.retrieve_memories.assert_called_with(query, 0)
+
+
+class TestMemorySystemErrorHandling:
+    """Test error handling in MemorySystem."""
+
+    @pytest.fixture
+    def memory_system(self, mock_config):
+        """Create MemorySystem with mocked dependencies."""
+        with (
+            patch("gui_agent_memory.main.get_config", return_value=mock_config),
+            patch("gui_agent_memory.main.MemoryStorage") as mock_storage_class,
+            patch("gui_agent_memory.main.MemoryIngestion") as mock_ingestion_class,
+            patch("gui_agent_memory.main.MemoryRetriever") as mock_retriever_class,
+        ):
+            mock_storage = Mock()
+            mock_ingestion = Mock()
+            mock_retriever = Mock()
+
+            mock_storage_class.return_value = mock_storage
+            mock_ingestion_class.return_value = mock_ingestion
+            mock_retriever_class.return_value = mock_retriever
+
+            system = MemorySystem()
+            system._mock_storage = mock_storage
+            system._mock_ingestion = mock_ingestion
+            system._mock_retriever = mock_retriever
+
+            yield system
+
+    def test_retrieve_memories_retrieval_error(self, memory_system):
+        """Test retrieve_memories when RetrievalError is raised."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        memory_system._mock_retriever.retrieve_memories.side_effect = RetrievalError(
+            "Test retrieval error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.retrieve_memories("test query")
+
+        assert "Memory retrieval failed" in str(exc_info.value)
+
+    def test_learn_from_task_empty_raw_history(self, memory_system):
+        """Test learn_from_task with empty raw_history."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.learn_from_task(
+                raw_history=[],
+                is_successful=True,
+                source_task_id="task_123",
+            )
+
+        assert "Raw history cannot be empty" in str(exc_info.value)
+
+    def test_learn_from_task_empty_source_task_id(self, memory_system):
+        """Test learn_from_task with empty source_task_id."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.learn_from_task(
+                raw_history=[{"action": "click"}],
+                is_successful=True,
+                source_task_id="",
+            )
+
+        assert "Source task ID cannot be empty" in str(exc_info.value)
+
+    def test_learn_from_task_whitespace_source_task_id(self, memory_system):
+        """Test learn_from_task with whitespace-only source_task_id."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.learn_from_task(
+                raw_history=[{"action": "click"}],
+                is_successful=True,
+                source_task_id="   ",
+            )
+
+        assert "Source task ID cannot be empty" in str(exc_info.value)
+
+    def test_learn_from_task_ingestion_error(self, memory_system):
+        """Test learn_from_task when IngestionError is raised."""
+        from gui_agent_memory.ingestion import IngestionError
+
+        memory_system._mock_ingestion.learn_from_task.side_effect = IngestionError(
+            "Test ingestion error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.learn_from_task(
+                raw_history=[{"action": "click"}],
+                is_successful=True,
+                source_task_id="task_123",
+            )
+
+        assert "Learning from task failed" in str(exc_info.value)
+
+    def test_add_fact_empty_content(self, memory_system):
+        """Test add_fact with empty content."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.add_fact(
+                content="",
+                keywords=["test"],
+            )
+
+        assert "Fact content cannot be empty" in str(exc_info.value)
+
+    def test_add_fact_whitespace_content(self, memory_system):
+        """Test add_fact with whitespace-only content."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.add_fact(
+                content="   ",
+                keywords=["test"],
+            )
+
+        assert "Fact content cannot be empty" in str(exc_info.value)
+
+    def test_add_fact_empty_keywords(self, memory_system):
+        """Test add_fact with empty keywords list."""
+        memory_system._mock_ingestion.add_fact.return_value = "fact_123"
+
+        result = memory_system.add_fact(
+            content="Test fact",
+            keywords=[],
+        )
+
+        assert result == "fact_123"
+        memory_system._mock_ingestion.add_fact.assert_called_once_with(
+            "Test fact", [], "manual"
+        )
+
+    def test_add_fact_ingestion_error(self, memory_system):
+        """Test add_fact when IngestionError is raised."""
+        from gui_agent_memory.ingestion import IngestionError
+
+        memory_system._mock_ingestion.add_fact.side_effect = IngestionError(
+            "Test ingestion error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.add_fact(
+                content="Test fact",
+                keywords=["test"],
+            )
+
+        assert "Adding fact failed" in str(exc_info.value)
+
+
+class TestMemorySystemAdditionalMethods:
+    """Test additional MemorySystem methods not covered in basic tests."""
+
+    @pytest.fixture
+    def memory_system(self, mock_config):
+        """Create MemorySystem with mocked dependencies."""
+        with (
+            patch("gui_agent_memory.main.get_config", return_value=mock_config),
+            patch("gui_agent_memory.main.MemoryStorage") as mock_storage_class,
+            patch("gui_agent_memory.main.MemoryIngestion") as mock_ingestion_class,
+            patch("gui_agent_memory.main.MemoryRetriever") as mock_retriever_class,
+        ):
+            mock_storage = Mock()
+            mock_ingestion = Mock()
+            mock_retriever = Mock()
+
+            mock_storage_class.return_value = mock_storage
+            mock_ingestion_class.return_value = mock_ingestion
+            mock_retriever_class.return_value = mock_retriever
+
+            system = MemorySystem()
+            system._mock_storage = mock_storage
+            system._mock_ingestion = mock_ingestion
+            system._mock_retriever = mock_retriever
+
+            yield system
+
+    def test_add_experience_success(self, memory_system):
+        """Test successful add_experience."""
+        from gui_agent_memory.models import ActionStep, ExperienceRecord
+
+        experience = ExperienceRecord(
+            task_description="Test task",
+            keywords=["test"],
+            action_flow=[
+                ActionStep(
+                    thought="Test thought",
+                    action="click",
+                    target_element_description="button",
+                )
+            ],
+            preconditions="Test preconditions",
+            is_successful=True,
+            source_task_id="task_123",
+        )
+
+        memory_system._mock_ingestion.add_experience.return_value = "exp_123"
+
+        result = memory_system.add_experience(experience)
+
+        assert result == "exp_123"
+        memory_system._mock_ingestion.add_experience.assert_called_once_with(experience)
+
+    def test_add_experience_invalid_type(self, memory_system):
+        """Test add_experience with invalid experience type."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.add_experience("not an experience record")
+
+        assert "Experience must be an ExperienceRecord instance" in str(exc_info.value)
+
+    def test_add_experience_ingestion_error(self, memory_system):
+        """Test add_experience when IngestionError is raised."""
+        from gui_agent_memory.ingestion import IngestionError
+        from gui_agent_memory.models import ActionStep, ExperienceRecord
+
+        experience = ExperienceRecord(
+            task_description="Test task",
+            keywords=["test"],
+            action_flow=[
+                ActionStep(
+                    thought="Test thought",
+                    action="click",
+                    target_element_description="button",
+                )
+            ],
+            preconditions="Test preconditions",
+            is_successful=True,
+            source_task_id="task_123",
+        )
+
+        memory_system._mock_ingestion.add_experience.side_effect = IngestionError(
+            "Test ingestion error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.add_experience(experience)
+
+        assert "Adding experience failed" in str(exc_info.value)
+
+    def test_batch_add_facts_success(self, memory_system):
+        """Test successful batch_add_facts."""
+        facts_data = [
+            {
+                "content": "Fact 1",
+                "keywords": ["fact1"],
+                "source": "test",
+            },
+            {
+                "content": "Fact 2",
+                "keywords": ["fact2"],
+            },
+        ]
+
+        memory_system._mock_ingestion.batch_add_facts.return_value = [
+            "fact_1",
+            "fact_2",
+        ]
+
+        result = memory_system.batch_add_facts(facts_data)
+
+        assert result == ["fact_1", "fact_2"]
+        memory_system._mock_ingestion.batch_add_facts.assert_called_once_with(
+            facts_data
+        )
+
+    def test_batch_add_facts_empty_data(self, memory_system):
+        """Test batch_add_facts with empty facts_data."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.batch_add_facts([])
+
+        assert "Facts data cannot be empty" in str(exc_info.value)
+
+    def test_batch_add_facts_invalid_data_type(self, memory_system):
+        """Test batch_add_facts with invalid fact data type."""
+        facts_data = ["not a dict"]
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.batch_add_facts(facts_data)
+
+        assert "Fact data at index 0 must be a dictionary" in str(exc_info.value)
+
+    def test_batch_add_facts_missing_content(self, memory_system):
+        """Test batch_add_facts with missing content in fact."""
+        facts_data = [{"keywords": ["test"]}]
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.batch_add_facts(facts_data)
+
+        assert "Fact at index 0 must have non-empty content" in str(exc_info.value)
+
+    def test_batch_add_facts_empty_content(self, memory_system):
+        """Test batch_add_facts with empty content in fact."""
+        facts_data = [{"content": "", "keywords": ["test"]}]
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.batch_add_facts(facts_data)
+
+        assert "Fact at index 0 must have non-empty content" in str(exc_info.value)
+
+    def test_batch_add_facts_whitespace_content(self, memory_system):
+        """Test batch_add_facts with whitespace-only content in fact."""
+        facts_data = [{"content": "   ", "keywords": ["test"]}]
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.batch_add_facts(facts_data)
+
+        assert "Fact at index 0 must have non-empty content" in str(exc_info.value)
+
+    def test_batch_add_facts_ingestion_error(self, memory_system):
+        """Test batch_add_facts when IngestionError is raised."""
+        from gui_agent_memory.ingestion import IngestionError
+
+        facts_data = [{"content": "Test fact", "keywords": ["test"]}]
+
+        memory_system._mock_ingestion.batch_add_facts.side_effect = IngestionError(
+            "Test ingestion error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.batch_add_facts(facts_data)
+
+        assert "Batch adding facts failed" in str(exc_info.value)
+
+    def test_get_similar_experiences_success(self, memory_system):
+        """Test successful get_similar_experiences."""
+        from gui_agent_memory.models import ExperienceRecord
+
+        mock_experiences = [Mock(spec=ExperienceRecord), Mock(spec=ExperienceRecord)]
+        memory_system._mock_retriever.get_similar_experiences.return_value = (
+            mock_experiences
+        )
+
+        result = memory_system.get_similar_experiences("Test task", top_n=5)
+
+        assert result == mock_experiences
+        memory_system._mock_retriever.get_similar_experiences.assert_called_once_with(
+            "Test task", 5
+        )
+
+    def test_get_similar_experiences_empty_task_description(self, memory_system):
+        """Test get_similar_experiences with empty task_description."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.get_similar_experiences("", top_n=5)
+
+        assert "Task description cannot be empty" in str(exc_info.value)
+
+    def test_get_similar_experiences_whitespace_task_description(self, memory_system):
+        """Test get_similar_experiences with whitespace-only task_description."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.get_similar_experiences("   ", top_n=5)
+
+        assert "Task description cannot be empty" in str(exc_info.value)
+
+    def test_get_similar_experiences_retrieval_error(self, memory_system):
+        """Test get_similar_experiences when RetrievalError is raised."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        memory_system._mock_retriever.get_similar_experiences.side_effect = (
+            RetrievalError("Test retrieval error")
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.get_similar_experiences("Test task", top_n=5)
+
+        assert "Getting similar experiences failed" in str(exc_info.value)
+
+    def test_get_related_facts_success(self, memory_system):
+        """Test successful get_related_facts."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_facts = [Mock(spec=FactRecord), Mock(spec=FactRecord)]
+        memory_system._mock_retriever.get_related_facts.return_value = mock_facts
+
+        result = memory_system.get_related_facts("Test topic", top_n=5)
+
+        assert result == mock_facts
+        memory_system._mock_retriever.get_related_facts.assert_called_once_with(
+            "Test topic", 5
+        )
+
+    def test_get_related_facts_empty_topic(self, memory_system):
+        """Test get_related_facts with empty topic."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.get_related_facts("", top_n=5)
+
+        assert "Topic cannot be empty" in str(exc_info.value)
+
+    def test_get_related_facts_whitespace_topic(self, memory_system):
+        """Test get_related_facts with whitespace-only topic."""
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.get_related_facts("   ", top_n=5)
+
+        assert "Topic cannot be empty" in str(exc_info.value)
+
+    def test_get_related_facts_retrieval_error(self, memory_system):
+        """Test get_related_facts when RetrievalError is raised."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        memory_system._mock_retriever.get_related_facts.side_effect = RetrievalError(
+            "Test retrieval error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.get_related_facts("Test topic", top_n=5)
+
+        assert "Getting related facts failed" in str(exc_info.value)
+
+    def test_get_system_stats_success(self, memory_system):
+        """Test successful get_system_stats."""
+        storage_stats = {"experiences_count": 10, "facts_count": 5}
+        memory_system._mock_storage.get_collection_stats.return_value = storage_stats
+
+        # Configure the mock config object
+        memory_system.config.embedding_model = "test-embedding-model"
+        memory_system.config.reranker_model = "test-reranker-model"
+        memory_system.config.experience_llm_model = "test-llm-model"
+        memory_system.config.chroma_db_path = "/test/path"
+
+        result = memory_system.get_system_stats()
+
+        expected = {
+            "storage": storage_stats,
+            "configuration": {
+                "embedding_model": "test-embedding-model",
+                "reranker_model": "test-reranker-model",
+                "experience_llm_model": "test-llm-model",
+                "chroma_db_path": "/test/path",
+            },
+            "version": "1.0.0",
+        }
+
+        assert result == expected
+        memory_system._mock_storage.get_collection_stats.assert_called_once()
+
+    def test_get_system_stats_storage_error(self, memory_system):
+        """Test get_system_stats when StorageError is raised."""
+        from gui_agent_memory.storage import StorageError
+
+        memory_system._mock_storage.get_collection_stats.side_effect = StorageError(
+            "Test storage error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.get_system_stats()
+
+        assert "Getting system stats failed" in str(exc_info.value)
+
+    def test_validate_system_success(self, memory_system):
+        """Test successful validate_system."""
+        memory_system.config.validate_configuration.return_value = True
+        memory_system._mock_storage.get_collection_stats.return_value = {}
+
+        result = memory_system.validate_system()
+
+        assert result is True
+        memory_system.config.validate_configuration.assert_called_once()
+        memory_system._mock_storage.get_collection_stats.assert_called_once()
+
+    def test_validate_system_configuration_error(self, memory_system):
+        """Test validate_system when ConfigurationError is raised."""
+        from gui_agent_memory.config import ConfigurationError
+
+        memory_system.config.validate_configuration.side_effect = ConfigurationError(
+            "Test configuration error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.validate_system()
+
+        assert "System validation failed" in str(exc_info.value)
+
+    def test_validate_system_storage_error(self, memory_system):
+        """Test validate_system when StorageError is raised."""
+        from gui_agent_memory.storage import StorageError
+
+        memory_system.config.validate_configuration.return_value = True
+        memory_system._mock_storage.get_collection_stats.side_effect = StorageError(
+            "Test storage error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.validate_system()
+
+        assert "System validation failed" in str(exc_info.value)
+
+    def test_clear_all_memories_success(self, memory_system):
+        """Test successful clear_all_memories."""
+        result = memory_system.clear_all_memories()
+
+        assert "Successfully cleared all memories" in result
+        memory_system._mock_storage.clear_collections.assert_called_once()
+
+    def test_clear_all_memories_storage_error(self, memory_system):
+        """Test clear_all_memories when StorageError is raised."""
+        from gui_agent_memory.storage import StorageError
+
+        memory_system._mock_storage.clear_collections.side_effect = StorageError(
+            "Test storage error"
+        )
+
+        with pytest.raises(MemorySystemError) as exc_info:
+            memory_system.clear_all_memories()
+
+        assert "Clearing memories failed" in str(exc_info.value)
+
+
+class TestCreateMemorySystemFunction:
+    """Test the create_memory_system convenience function."""
+
+    def test_create_memory_system_success(self, mock_config):
+        """Test successful create_memory_system."""
+        with (
+            patch("gui_agent_memory.main.get_config", return_value=mock_config),
+            patch("gui_agent_memory.main.MemoryStorage"),
+            patch("gui_agent_memory.main.MemoryIngestion"),
+            patch("gui_agent_memory.main.MemoryRetriever"),
+        ):
+            result = create_memory_system()
+
+            assert isinstance(result, MemorySystem)
+
+    def test_create_memory_system_initialization_failure(self, mock_config):
+        """Test create_memory_system when initialization fails."""
+        with (
+            patch("gui_agent_memory.main.get_config", return_value=mock_config),
+            patch(
+                "gui_agent_memory.main.MemoryStorage",
+                side_effect=Exception("Test error"),
+            ),
+        ):
+            with pytest.raises(MemorySystemError) as exc_info:
+                create_memory_system()
+
+            assert "Failed to initialize memory system" in str(exc_info.value)

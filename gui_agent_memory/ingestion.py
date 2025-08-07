@@ -21,6 +21,9 @@ from .config import get_config
 from .models import ActionStep, ExperienceRecord, FactRecord, LearningRequest
 from .storage import MemoryStorage
 
+# Module-level logger
+logger = logging.getLogger(__name__)
+
 
 class IngestionError(Exception):
     """Exception raised for ingestion-related errors."""
@@ -127,6 +130,14 @@ class MemoryIngestion:
             "但是",
             "如果",
             "那么",
+            "了",
+            "也",
+            "就",
+            "都",
+            "要",
+            "可以",
+            "这",
+            "那",
             "the",
             "a",
             "an",
@@ -135,6 +146,14 @@ class MemoryIngestion:
             "but",
             "if",
             "then",
+            "to",
+            "for",
+            "with",
+            "by",
+            "from",
+            "at",
+            "on",
+            "in",
         }
         keywords = [
             token.lower()
@@ -344,6 +363,7 @@ class MemoryIngestion:
             }
 
             self.logger.error(f"Failed to learn from task: {json.dumps(failure_data)}")
+            logger.error(f"Failed to learn from task: {json.dumps(failure_data)}")
 
             raise IngestionError(
                 f"Failed to learn from task '{source_task_id}': {e}"
@@ -424,6 +444,13 @@ class MemoryIngestion:
             IngestionError: If batch operation fails
         """
         try:
+            # Validate all facts first
+            for i, fact_data in enumerate(facts_data):
+                if not fact_data.get("content", "").strip():
+                    raise IngestionError(
+                        f"Content cannot be empty for fact at index {i}"
+                    )
+
             facts = []
             embeddings = []
 
@@ -445,4 +472,7 @@ class MemoryIngestion:
             return [f"Successfully added fact. Record ID: {rid}" for rid in record_ids]
 
         except Exception as e:
+            # Handle storage-specific errors with more specific messages
+            if "storage" in str(e).lower() or "StorageError" in str(type(e).__name__):
+                raise IngestionError(f"Failed to add facts to storage: {e}") from e
             raise IngestionError(f"Failed to batch add facts: {e}") from e

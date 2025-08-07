@@ -132,6 +132,10 @@ class MemoryStorage:
         if len(experiences) != len(embeddings):
             raise StorageError("Number of experiences must match number of embeddings")
 
+        # Handle empty list case
+        if not experiences:
+            return []
+
         try:
             ids = []
             documents = []
@@ -174,7 +178,7 @@ class MemoryStorage:
             return ids
 
         except Exception as e:
-            raise StorageError(f"Failed to add experiences: {e}") from e
+            raise StorageError(f"Failed to add experiences to ChromaDB: {e}") from e
 
     def add_facts(
         self, facts: list[FactRecord], embeddings: list[list[float]]
@@ -194,6 +198,10 @@ class MemoryStorage:
         """
         if len(facts) != len(embeddings):
             raise StorageError("Number of facts must match number of embeddings")
+
+        # Handle empty list case
+        if not facts:
+            return []
 
         try:
             ids = []
@@ -233,7 +241,7 @@ class MemoryStorage:
             return ids
 
         except Exception as e:
-            raise StorageError(f"Failed to add facts: {e}") from e
+            raise StorageError(f"Failed to add facts to ChromaDB: {e}") from e
 
     def query_experiences(
         self,
@@ -266,7 +274,7 @@ class MemoryStorage:
             )
             return cast(dict[str, list[Any]], result)
         except Exception as e:
-            raise StorageError(f"Failed to query experiences: {e}") from e
+            raise StorageError(f"Failed to query experiences from ChromaDB: {e}") from e
 
     def query_facts(
         self,
@@ -299,7 +307,7 @@ class MemoryStorage:
             )
             return cast(dict[str, list[Any]], result)
         except Exception as e:
-            raise StorageError(f"Failed to query facts: {e}") from e
+            raise StorageError(f"Failed to query facts from ChromaDB: {e}") from e
 
     def experience_exists(self, source_task_id: str) -> bool:
         """
@@ -310,12 +318,17 @@ class MemoryStorage:
 
         Returns:
             True if experience exists, False otherwise
+
+        Raises:
+            StorageError: If check operation fails
         """
         try:
             results = self.experiential_collection.get(ids=[source_task_id])
             return len(results["ids"]) > 0
-        except Exception:
-            return False
+        except Exception as e:
+            raise StorageError(
+                f"Failed to check experience existence in ChromaDB: {e}"
+            ) from e
 
     def get_collection_stats(self) -> dict[str, int]:
         """
@@ -334,7 +347,9 @@ class MemoryStorage:
                 "total": experiential_count + declarative_count,
             }
         except Exception as e:
-            raise StorageError(f"Failed to get collection stats: {e}") from e
+            raise StorageError(
+                f"Failed to get collection statistics from ChromaDB: {e}"
+            ) from e
 
     def clear_collections(self) -> None:
         """Clear all data from both collections (for testing purposes)."""
@@ -344,7 +359,7 @@ class MemoryStorage:
             self.client.delete_collection(self.config.declarative_collection_name)
             self._init_collections()
         except Exception as e:
-            raise StorageError(f"Failed to clear collections: {e}") from e
+            raise StorageError(f"Failed to clear collections in ChromaDB: {e}") from e
 
     def update_usage_stats(self, record_ids: list[str], collection_name: str) -> None:
         """
@@ -388,4 +403,6 @@ class MemoryStorage:
                 collection.update(ids=[record_id], metadatas=[metadata])
 
         except Exception as e:
-            raise StorageError(f"Failed to update usage stats: {e}") from e
+            raise StorageError(
+                f"Failed to update usage statistics in ChromaDB: {e}"
+            ) from e

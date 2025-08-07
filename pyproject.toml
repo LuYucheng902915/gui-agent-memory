@@ -103,6 +103,11 @@ addopts = [
 filterwarnings = [
     "ignore::DeprecationWarning:jieba.*",
 ]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow-running tests",
+]
 
 [tool.coverage.run]
 source = ["gui_agent_memory"]

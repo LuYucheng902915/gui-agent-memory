@@ -505,3 +505,425 @@ class TestMemoryIngestion:
                 keywords=["empty"],
                 source="test",
             )
+
+
+class TestMemoryIngestionAdvanced:
+    """Advanced test cases for MemoryIngestion error handling and edge cases."""
+
+    @pytest.fixture
+    def mock_storage(self):
+        """Mock storage for testing."""
+        storage = Mock()
+        storage.query.return_value = []  # No existing records
+        storage.add_facts.return_value = ["test_fact_id"]
+        storage.add_experiences.return_value = ["test_exp_id"]
+        storage.experience_exists.return_value = False
+        return storage
+
+    @pytest.fixture
+    def ingestion(self, mock_config, mock_storage):
+        """Create MemoryIngestion instance with mocked dependencies."""
+        with (
+            patch("gui_agent_memory.ingestion.get_config", return_value=mock_config),
+            patch(
+                "gui_agent_memory.ingestion.MemoryStorage", return_value=mock_storage
+            ),
+        ):
+            return MemoryIngestion()
+
+    def test_extract_keywords_with_llm_success(self, ingestion, mock_config):
+        """Test successful keyword extraction with LLM."""
+        # Mock LLM response
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = '["login", "authentication", "user"]'
+
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        result = ingestion._extract_keywords_with_llm("How to login to the system")
+
+        assert result == ["login", "authentication", "user"]
+        mock_client.chat.completions.create.assert_called_once()
+
+    def test_extract_keywords_with_llm_empty_response(self, ingestion, mock_config):
+        """Test LLM keyword extraction when LLM returns empty response."""
+        # Mock LLM response with None content
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = None
+
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        # Should fallback to jieba when LLM returns empty response
+        result = ingestion._extract_keywords_with_llm("test query")
+
+        assert isinstance(result, list)
+        # Should contain keywords extracted by jieba
+        assert len(result) > 0
+
+    def test_extract_keywords_with_llm_invalid_json(self, ingestion, mock_config):
+        """Test LLM keyword extraction with invalid JSON fallback to jieba."""
+        # Mock LLM response with invalid JSON
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = "invalid json response"
+
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        # Should fallback to jieba
+        result = ingestion._extract_keywords_with_llm("login to system")
+
+        assert isinstance(result, list)
+        assert len(result) > 0  # Should extract some keywords with jieba
+
+    def test_extract_keywords_with_llm_api_error(self, ingestion, mock_config):
+        """Test LLM keyword extraction when API fails, fallback to jieba."""
+        # Mock LLM client to raise an exception
+        mock_client = Mock()
+        mock_client.chat.completions.create.side_effect = Exception("API Error")
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        # Should fallback to jieba
+        result = ingestion._extract_keywords_with_llm("login to system")
+
+        assert isinstance(result, list)
+        assert len(result) > 0  # Should extract some keywords with jieba
+
+    def test_extract_keywords_with_jieba_chinese_text(self, ingestion):
+        """Test jieba keyword extraction with Chinese text."""
+        chinese_text = "如何使用这个应用程序进行登录"
+
+        result = ingestion._extract_keywords_with_jieba(chinese_text)
+
+        assert isinstance(result, list)
+        assert len(result) > 0
+        # Should filter out common stop words
+        assert "的" not in result
+        assert "是" not in result
+
+    def test_extract_keywords_with_jieba_mixed_language(self, ingestion):
+        """Test jieba keyword extraction with mixed language text."""
+        mixed_text = "How to login 如何登录 to the application"
+
+        result = ingestion._extract_keywords_with_jieba(mixed_text)
+
+        assert isinstance(result, list)
+        assert len(result) > 0
+        # Should filter out English stop words
+        assert "the" not in result
+        assert "to" not in result
+
+    def test_extract_keywords_with_jieba_short_tokens(self, ingestion):
+        """Test jieba keyword extraction filters out short tokens."""
+        text = "a b c login system test"
+
+        result = ingestion._extract_keywords_with_jieba(text)
+
+        # Should filter out single character tokens
+        assert "a" not in result
+        assert "b" not in result
+        assert "c" not in result
+        # Should keep longer tokens
+        assert "login" in result
+        assert "system" in result
+        assert "test" in result
+
+    def test_distill_experience_with_llm_success(self, ingestion, mock_config):
+        """Test successful experience distillation with LLM."""
+        from gui_agent_memory.models import LearningRequest
+
+        # Mock LLM response
+        distilled_experience = {
+            "task_description": "Login to application",
+            "keywords": ["login", "authentication"],
+            "action_flow": [
+                {
+                    "thought": "Click login button",
+                    "action": "click",
+                    "target_element_description": "login button",
+                }
+            ],
+            "preconditions": "User has valid credentials",
+        }
+
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = json.dumps(distilled_experience)
+
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        learning_request = LearningRequest(
+            raw_history=[{"action": "click", "target": "button"}],
+            task_description="Test task",
+            is_successful=True,
+            source_task_id="test_123",
+            app_name="TestApp",
+        )
+
+        result = ingestion._distill_experience_with_llm(learning_request)
+
+        assert result == distilled_experience
+        mock_client.chat.completions.create.assert_called_once()
+
+    def test_distill_experience_with_llm_empty_response(self, ingestion, mock_config):
+        """Test experience distillation when LLM returns empty response."""
+        from gui_agent_memory.ingestion import IngestionError
+        from gui_agent_memory.models import LearningRequest
+
+        # Mock LLM response with None content
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = None
+
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        learning_request = LearningRequest(
+            raw_history=[{"action": "click", "target": "button"}],
+            task_description="Test task",
+            is_successful=True,
+            source_task_id="test_123",
+            app_name="TestApp",
+        )
+
+        with pytest.raises(IngestionError) as exc_info:
+            ingestion._distill_experience_with_llm(learning_request)
+
+        assert "LLM returned empty response" in str(exc_info.value)
+
+    def test_distill_experience_with_llm_json_in_markdown(self, ingestion, mock_config):
+        """Test experience distillation with JSON wrapped in markdown code blocks."""
+        from gui_agent_memory.models import LearningRequest
+
+        distilled_experience = {
+            "task_description": "Login to application",
+            "keywords": ["login", "authentication"],
+            "action_flow": [],
+            "preconditions": "User has credentials",
+        }
+
+        # Mock LLM response with markdown code blocks
+        markdown_response = f"Here's the distilled experience:\n```json\n{json.dumps(distilled_experience)}\n```\nEnd of response."
+
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = markdown_response
+
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        learning_request = LearningRequest(
+            raw_history=[{"action": "click", "target": "button"}],
+            task_description="Test task",
+            is_successful=True,
+            source_task_id="test_123",
+            app_name="TestApp",
+        )
+
+        result = ingestion._distill_experience_with_llm(learning_request)
+
+        assert result == distilled_experience
+
+    def test_distill_experience_with_llm_invalid_json(self, ingestion, mock_config):
+        """Test experience distillation when LLM returns invalid JSON."""
+        from gui_agent_memory.ingestion import IngestionError
+        from gui_agent_memory.models import LearningRequest
+
+        # Mock LLM response with invalid JSON
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = "invalid json response"
+
+        mock_client = Mock()
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        learning_request = LearningRequest(
+            raw_history=[{"action": "click", "target": "button"}],
+            task_description="Test task",
+            is_successful=True,
+            source_task_id="test_123",
+            app_name="TestApp",
+        )
+
+        with pytest.raises(IngestionError) as exc_info:
+            ingestion._distill_experience_with_llm(learning_request)
+
+        assert "Failed to distill experience with LLM" in str(exc_info.value)
+
+    def test_distill_experience_with_llm_api_error(self, ingestion, mock_config):
+        """Test experience distillation when LLM API fails."""
+        from gui_agent_memory.ingestion import IngestionError
+        from gui_agent_memory.models import LearningRequest
+
+        # Mock LLM client to raise an exception
+        mock_client = Mock()
+        mock_client.chat.completions.create.side_effect = Exception("API Error")
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        learning_request = LearningRequest(
+            raw_history=[{"action": "click", "target": "button"}],
+            task_description="Test task",
+            is_successful=True,
+            source_task_id="test_123",
+            app_name="TestApp",
+        )
+
+        with pytest.raises(IngestionError) as exc_info:
+            ingestion._distill_experience_with_llm(learning_request)
+
+        assert "Failed to distill experience with LLM" in str(exc_info.value)
+
+    def test_learn_from_task_error_logging(self, ingestion, mock_config):
+        """Test that learning failures are properly logged."""
+        from gui_agent_memory.ingestion import IngestionError
+
+        # Mock LLM client to raise an exception
+        mock_client = Mock()
+        mock_client.chat.completions.create.side_effect = Exception("LLM API Error")
+        mock_config.get_experience_llm_client.return_value = mock_client
+
+        with patch("gui_agent_memory.ingestion.logger") as mock_logger:
+            # This should handle the exception and log it
+            try:
+                ingestion.learn_from_task(
+                    raw_history=[{"action": "click", "target": "button"}],
+                    is_successful=True,
+                    source_task_id="test_task_error",
+                    app_name="TestApp",
+                )
+            except IngestionError:
+                pass  # Expected
+
+            # Verify error was logged
+            mock_logger.error.assert_called()
+
+    def test_add_experience_with_existing_record(self, ingestion):
+        """Test adding experience when record with same source_task_id exists."""
+        from gui_agent_memory.models import ActionStep, ExperienceRecord
+
+        # Mock storage to indicate experience exists
+        ingestion.storage.experience_exists.return_value = True
+
+        experience = ExperienceRecord(
+            task_description="Test task",
+            keywords=["test"],
+            action_flow=[
+                ActionStep(
+                    thought="Test thought",
+                    action="click",
+                    target_element_description="button",
+                )
+            ],
+            preconditions="Test preconditions",
+            is_successful=True,
+            source_task_id="existing_task_123",
+        )
+
+        result = ingestion.add_experience(experience)
+
+        assert "already exists" in result.lower()
+        # Should not call storage.add_experiences
+        ingestion.storage.add_experiences.assert_not_called()
+
+    def test_generate_embedding_api_error(self, ingestion, mock_config):
+        """Test embedding generation when API fails."""
+        from gui_agent_memory.ingestion import IngestionError
+
+        # Mock embedding client to raise an exception
+        mock_client = Mock()
+        mock_client.embeddings.create.side_effect = Exception("API Error")
+        mock_config.get_embedding_client.return_value = mock_client
+
+        with pytest.raises(IngestionError) as exc_info:
+            ingestion._generate_embedding("test content")
+
+        assert "Failed to generate embedding" in str(exc_info.value)
+
+    def test_batch_add_facts_with_validation_errors(self, ingestion, mock_config):
+        """Test batch_add_facts with validation errors in some facts."""
+        from gui_agent_memory.ingestion import IngestionError
+
+        facts_data = [
+            {
+                "content": "Valid fact 1",
+                "keywords": ["valid", "fact1"],
+                "source": "test1",
+            },
+            {
+                "content": "",  # Invalid: empty content
+                "keywords": ["invalid"],
+                "source": "test2",
+            },
+            {
+                "content": "Valid fact 2",
+                "keywords": ["valid", "fact2"],
+                "source": "test3",
+            },
+        ]
+
+        # Should raise error for invalid facts
+        with pytest.raises(IngestionError) as exc_info:
+            ingestion.batch_add_facts(facts_data)
+
+        assert "Content cannot be empty" in str(exc_info.value)
+
+    def test_batch_add_facts_embedding_error(self, ingestion, mock_config):
+        """Test batch_add_facts when embedding generation fails."""
+        from gui_agent_memory.ingestion import IngestionError
+
+        facts_data = [
+            {
+                "content": "Valid fact",
+                "keywords": ["valid"],
+                "source": "test",
+            }
+        ]
+
+        # Mock embedding client to raise an exception
+        mock_client = Mock()
+        mock_client.embeddings.create.side_effect = Exception("Embedding API Error")
+        mock_config.get_embedding_client.return_value = mock_client
+
+        with pytest.raises(IngestionError) as exc_info:
+            ingestion.batch_add_facts(facts_data)
+
+        assert "Failed to generate embedding" in str(exc_info.value)
+
+    def test_batch_add_facts_storage_error(self, ingestion, mock_config):
+        """Test batch_add_facts when storage operation fails."""
+        from gui_agent_memory.ingestion import IngestionError
+        from gui_agent_memory.storage import StorageError
+
+        facts_data = [
+            {
+                "content": "Valid fact",
+                "keywords": ["valid"],
+                "source": "test",
+            }
+        ]
+
+        # Mock successful embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_response.data = [Mock(embedding=[0.1] * 1024)]
+        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
+            mock_embedding_response
+        )
+
+        # Mock storage to raise an error
+        ingestion.storage.add_facts.side_effect = StorageError("Storage failed")
+
+        with pytest.raises(IngestionError) as exc_info:
+            ingestion.batch_add_facts(facts_data)
+
+        assert "Failed to add facts to storage" in str(exc_info.value)

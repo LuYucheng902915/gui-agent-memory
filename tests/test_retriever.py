@@ -476,3 +476,510 @@ class TestMemoryRetriever:
         except ValueError:
             # Acceptable to raise ValueError for negative values
             pass
+
+
+class TestMemoryRetrieverAdvanced:
+    """Advanced test cases for MemoryRetriever error handling and edge cases."""
+
+    @pytest.fixture
+    def mock_storage(self):
+        """Mock storage for testing."""
+        storage = Mock()
+        # Default empty responses
+        storage.query_experiences.return_value = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
+        storage.query_facts.return_value = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
+        return storage
+
+    @pytest.fixture
+    def retriever(self, mock_config, mock_storage):
+        """Create MemoryRetriever instance with mocked dependencies."""
+        with (
+            patch("gui_agent_memory.retriever.get_config", return_value=mock_config),
+            patch(
+                "gui_agent_memory.retriever.MemoryStorage", return_value=mock_storage
+            ),
+        ):
+            return MemoryRetriever()
+
+    def test_keyword_filter_experiences_empty_keywords(self, retriever):
+        """Test keyword filtering with empty keywords list."""
+        result = retriever._keyword_filter_experiences([])
+
+        assert result == {}
+
+    def test_keyword_filter_facts_empty_keywords(self, retriever):
+        """Test keyword filtering with empty keywords list."""
+        result = retriever._keyword_filter_facts([])
+
+        assert result == {}
+
+    def test_vector_search_experiences_storage_error(self, retriever, mock_config):
+        """Test vector search when storage operation fails."""
+        from gui_agent_memory.retriever import RetrievalError
+        from gui_agent_memory.storage import StorageError
+
+        # Mock embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_response.data = [Mock(embedding=[0.1, 0.2, 0.3])]
+        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
+            mock_embedding_response
+        )
+
+        # Mock storage to raise an error
+        retriever.storage.query_experiences.side_effect = StorageError("Storage failed")
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever._vector_search_experiences([0.1, 0.2, 0.3], top_k=10)
+
+        assert "Failed to perform vector search on experiences" in str(exc_info.value)
+
+    def test_vector_search_facts_storage_error(self, retriever, mock_config):
+        """Test vector search when storage operation fails."""
+        from gui_agent_memory.retriever import RetrievalError
+        from gui_agent_memory.storage import StorageError
+
+        # Mock embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_response.data = [Mock(embedding=[0.1, 0.2, 0.3])]
+        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
+            mock_embedding_response
+        )
+
+        # Mock storage to raise an error
+        retriever.storage.query_facts.side_effect = StorageError("Storage failed")
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever._vector_search_facts([0.1, 0.2, 0.3], top_k=10)
+
+        assert "Failed to perform vector search on facts" in str(exc_info.value)
+
+    def test_vector_search_experiences_malformed_results(self, retriever):
+        """Test vector search with malformed storage results."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        # Mock storage to return malformed results
+        retriever.storage.query_experiences.return_value = {
+            "ids": [["exp1", "exp2"]],
+            "documents": [["doc1"]],  # Mismatched lengths
+            "metadatas": [["meta1", "meta2"]],
+            "distances": [[0.1, 0.2]],
+        }
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever._vector_search_experiences([0.1, 0.2, 0.3], top_k=10)
+
+        assert "Malformed storage results: inconsistent array lengths" in str(
+            exc_info.value
+        )
+
+    def test_vector_search_facts_malformed_results(self, retriever):
+        """Test vector search with malformed storage results."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        # Mock storage to return malformed results
+        retriever.storage.query_facts.return_value = {
+            "ids": [["fact1", "fact2"]],
+            "documents": [["doc1"]],  # Mismatched lengths
+            "metadatas": [["meta1", "meta2"]],
+            "distances": [[0.1, 0.2]],
+        }
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever._vector_search_facts([0.1, 0.2, 0.3], top_k=10)
+
+        assert "Malformed storage results: inconsistent array lengths" in str(
+            exc_info.value
+        )
+
+    def test_rerank_results_empty_candidates(self, retriever, mock_config):
+        """Test reranking with empty candidate list."""
+        result = retriever._rerank_results("test query", [])
+
+        assert result == []
+
+    def test_rerank_results_single_candidate(self, retriever, mock_config):
+        """Test reranking with single candidate."""
+        candidates = [{"id": "test1", "content": "test content", "type": "experience"}]
+
+        result = retriever._rerank_results("test query", candidates)
+
+        # Should return the single candidate as-is
+        assert len(result) == 1
+        assert result[0] == candidates[0]
+
+    def test_rerank_results_reranker_api_error(self, retriever, mock_config):
+        """Test reranking when reranker API fails."""
+        candidates = [
+            {"id": "test1", "content": "content 1", "type": "experience"},
+            {"id": "test2", "content": "content 2", "type": "fact"},
+        ]
+
+        # Mock reranker client to raise an exception
+        mock_client = Mock()
+        mock_client.post.side_effect = Exception("Reranker API Error")
+        mock_config.get_reranker_client.return_value = mock_client
+
+        # Should fall back to original order when reranking fails
+        result = retriever._rerank_results("test query", candidates)
+
+        assert len(result) == 2
+        assert result == candidates  # Should return in original order
+
+    def test_rerank_results_malformed_response(self, retriever, mock_config):
+        """Test reranking with malformed API response."""
+        candidates = [
+            {"id": "test1", "content": "content 1", "type": "experience"},
+            {"id": "test2", "content": "content 2", "type": "fact"},
+        ]
+
+        # Mock reranker response with malformed data
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "results": [
+                {"index": 0},  # Missing 'relevance_score'
+                {"relevance_score": 0.8},  # Missing 'index'
+            ]
+        }
+        mock_response.raise_for_status.return_value = None
+
+        mock_client = Mock()
+        mock_client.post.return_value = mock_response
+        mock_config.get_reranker_client.return_value = mock_client
+
+        # Should fall back to original order when reranking response is malformed
+        result = retriever._rerank_results("test query", candidates)
+
+        assert len(result) == 2
+        assert result == candidates  # Should return in original order
+
+    def test_rerank_results_http_error(self, retriever, mock_config):
+        """Test reranking when HTTP error occurs - should fallback gracefully."""
+        candidates = [
+            {"id": "test1", "content": "content 1", "type": "experience"},
+            {"id": "test2", "content": "content 2", "type": "fact"},
+        ]
+
+        # Mock config for reranker
+        mock_config.gitee_ai_reranker_base_url = "https://test-reranker.com"
+        mock_config.gitee_ai_reranker_api_key = "test-key"
+        mock_config.reranker_model = "test-model"
+
+        # Mock requests.post to raise an HTTP error
+        with patch("gui_agent_memory.retriever.requests.post") as mock_post:
+            import requests
+
+            mock_post.side_effect = requests.RequestException("HTTP error")
+
+            # Should fall back to original results, not raise an error
+            result = retriever._rerank_results("test query", candidates)
+
+            # Should return original candidates
+            assert len(result) == 2
+            assert result == candidates
+
+    def test_merge_search_results_experiences_only(self, retriever):
+        """Test merging search results with only experiences."""
+        experience_results = [
+            {"id": "exp1", "score": 0.9, "type": "experience"},
+            {"id": "exp2", "score": 0.8, "type": "experience"},
+        ]
+        fact_results: list[dict] = []
+
+        result = retriever._merge_search_results(
+            experience_results, fact_results, limit=10
+        )
+
+        assert len(result) == 2
+        assert all(item["type"] == "experience" for item in result)
+
+    def test_merge_search_results_facts_only(self, retriever):
+        """Test merging search results with only facts."""
+        experience_results: list[dict] = []
+        fact_results = [
+            {"id": "fact1", "score": 0.9, "type": "fact"},
+            {"id": "fact2", "score": 0.8, "type": "fact"},
+        ]
+
+        result = retriever._merge_search_results(
+            experience_results, fact_results, limit=10
+        )
+
+        assert len(result) == 2
+        assert all(item["type"] == "fact" for item in result)
+
+    def test_merge_search_results_with_limit(self, retriever):
+        """Test merging search results with limit applied."""
+        experience_results = [
+            {"id": "exp1", "score": 0.9, "type": "experience"},
+            {"id": "exp2", "score": 0.8, "type": "experience"},
+            {"id": "exp3", "score": 0.7, "type": "experience"},
+        ]
+        fact_results = [
+            {"id": "fact1", "score": 0.85, "type": "fact"},
+            {"id": "fact2", "score": 0.75, "type": "fact"},
+        ]
+
+        result = retriever._merge_search_results(
+            experience_results, fact_results, limit=3
+        )
+
+        # Should be limited to 3 results
+        assert len(result) == 3
+        # Should be sorted by score (highest first)
+        scores = [item["score"] for item in result]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_convert_to_memory_objects_experiences(self, retriever):
+        """Test converting search results to ExperienceRecord objects."""
+        from gui_agent_memory.models import ExperienceRecord
+
+        search_results = [
+            {
+                "id": "exp1",
+                "document": "Test task",  # This is the task_description
+                "metadata": {
+                    "keywords": "test,task",
+                    "action_flow": '[{"thought": "test", "action": "click", "target_element_description": "button"}]',
+                    "preconditions": "Test preconditions",
+                    "is_successful": True,
+                    "usage_count": 0,
+                    "last_used_at": "2024-01-01T00:00:00Z",
+                    "source_task_id": "task_123",
+                },
+                "type": "experience",
+            }
+        ]
+
+        experiences, facts = retriever._convert_to_memory_objects(search_results)
+
+        assert len(experiences) == 1
+        assert len(facts) == 0
+        assert isinstance(experiences[0], ExperienceRecord)
+        assert experiences[0].task_description == "Test task"
+        assert experiences[0].keywords == ["test", "task"]
+
+    def test_convert_to_memory_objects_facts(self, retriever):
+        """Test converting search results to FactRecord objects."""
+        from gui_agent_memory.models import FactRecord
+
+        search_results = [
+            {
+                "id": "fact1",
+                "document": "Test fact content",  # This is the content
+                "metadata": {
+                    "keywords": "test,fact",
+                    "source": "test_source",
+                    "usage_count": 0,
+                    "last_used_at": "2024-01-01T00:00:00Z",
+                },
+                "type": "fact",
+            }
+        ]
+
+        experiences, facts = retriever._convert_to_memory_objects(search_results)
+
+        assert len(experiences) == 0
+        assert len(facts) == 1
+        assert isinstance(facts[0], FactRecord)
+        assert facts[0].content == "Test fact content"
+        assert facts[0].keywords == ["test", "fact"]
+
+    def test_convert_to_memory_objects_invalid_action_flow(self, retriever):
+        """Test converting search results with invalid action_flow JSON."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        search_results = [
+            {
+                "id": "exp1",
+                "document": "Test task",
+                "metadata": {
+                    "keywords": "test,task",
+                    "action_flow": "invalid json",  # Invalid JSON
+                    "preconditions": "Test preconditions",
+                    "is_successful": True,
+                    "usage_count": 0,
+                    "last_used_at": "2024-01-01T00:00:00Z",
+                    "source_task_id": "task_123",
+                },
+                "type": "experience",
+            }
+        ]
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever._convert_to_memory_objects(search_results)
+
+        assert "Failed to parse action_flow JSON" in str(exc_info.value)
+
+    def test_update_usage_stats_storage_error(self, retriever):
+        """Test usage stats update when storage operation fails."""
+        from gui_agent_memory.storage import StorageError
+
+        memories = ["exp1", "fact1"]
+
+        # Mock storage to raise an error
+        retriever.storage.update_usage_stats.side_effect = StorageError(
+            "Storage failed"
+        )
+
+        # Should handle error gracefully and log it
+        with patch("gui_agent_memory.retriever.logger") as mock_logger:
+            retriever._update_usage_stats(memories)
+
+            # Should log the error but not raise exception
+            mock_logger.error.assert_called()
+
+    def test_get_similar_experiences_embedding_error(self, retriever, mock_config):
+        """Test get_similar_experiences when embedding generation fails."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        # Mock embedding client to raise an exception
+        mock_client = Mock()
+        mock_client.embeddings.create.side_effect = Exception("Embedding API Error")
+        mock_config.get_embedding_client.return_value = mock_client
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever.get_similar_experiences("test task", top_n=5)
+
+        assert "Failed to generate query embedding" in str(exc_info.value)
+
+    def test_get_related_facts_embedding_error(self, retriever, mock_config):
+        """Test get_related_facts when embedding generation fails."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        # Mock embedding client to raise an exception
+        mock_client = Mock()
+        mock_client.embeddings.create.side_effect = Exception("Embedding API Error")
+        mock_config.get_embedding_client.return_value = mock_client
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever.get_related_facts("test topic", top_n=5)
+
+        assert "Failed to generate query embedding" in str(exc_info.value)
+
+    def test_get_similar_experiences_storage_error(self, retriever, mock_config):
+        """Test get_similar_experiences when storage query fails."""
+        from gui_agent_memory.retriever import RetrievalError
+        from gui_agent_memory.storage import StorageError
+
+        # Mock successful embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_response.data = [Mock(embedding=[0.1, 0.2, 0.3])]
+        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
+            mock_embedding_response
+        )
+
+        # Mock storage to raise an error
+        retriever.storage.query_experiences.side_effect = StorageError("Storage failed")
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever.get_similar_experiences("test task", top_n=5)
+
+        assert "Failed to perform vector search on experiences" in str(exc_info.value)
+
+    def test_get_related_facts_storage_error(self, retriever, mock_config):
+        """Test get_related_facts when storage query fails."""
+        from gui_agent_memory.retriever import RetrievalError
+        from gui_agent_memory.storage import StorageError
+
+        # Mock successful embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_response.data = [Mock(embedding=[0.1, 0.2, 0.3])]
+        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
+            mock_embedding_response
+        )
+
+        # Mock storage to raise an error
+        retriever.storage.query_facts.side_effect = StorageError("Storage failed")
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever.get_related_facts("test topic", top_n=5)
+
+        assert "Failed to perform vector search on facts" in str(exc_info.value)
+
+    def test_get_similar_experiences_conversion_error(self, retriever, mock_config):
+        """Test get_similar_experiences when object conversion fails."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        # Mock successful embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_response.data = [Mock(embedding=[0.1, 0.2, 0.3])]
+        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
+            mock_embedding_response
+        )
+
+        # Mock storage to return malformed experience data
+        retriever.storage.query_experiences.return_value = {
+            "ids": [["exp1"]],
+            "documents": [["doc1"]],
+            "metadatas": [
+                [
+                    {
+                        "task_description": "Test task",
+                        "keywords": "test",
+                        "action_flow": "invalid json",  # This will cause conversion to fail
+                        "preconditions": "Test",
+                        "is_successful": True,
+                        "usage_count": 0,
+                        "last_used_at": "2024-01-01T00:00:00Z",
+                        "source_task_id": "task_123",
+                    }
+                ]
+            ],
+            "distances": [[0.1]],
+        }
+
+        with pytest.raises(RetrievalError) as exc_info:
+            retriever.get_similar_experiences("test task", top_n=5)
+
+        assert "Failed to convert experiences" in str(exc_info.value)
+
+    def test_get_related_facts_conversion_error(self, retriever, mock_config):
+        """Test get_related_facts when object conversion fails."""
+        from gui_agent_memory.retriever import RetrievalError
+
+        # Mock successful embedding generation
+        mock_embedding_response = Mock()
+        mock_embedding_response.data = [Mock(embedding=[0.1, 0.2, 0.3])]
+        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
+            mock_embedding_response
+        )
+
+        # Mock storage to return fact data that will cause conversion issues
+        # We'll simulate this by patching the conversion method
+        retriever.storage.query_facts.return_value = {
+            "ids": [["fact1"]],
+            "documents": [["doc1"]],
+            "metadatas": [
+                [
+                    {
+                        "content": "Test fact",
+                        "keywords": "test",
+                        "source": "test",
+                        "usage_count": 0,
+                        "last_used_at": "2024-01-01T00:00:00Z",
+                    }
+                ]
+            ],
+            "distances": [[0.1]],
+        }
+
+        # Mock the conversion method to raise an exception
+        with patch.object(
+            retriever,
+            "_convert_to_memory_objects",
+            side_effect=Exception("Conversion failed"),
+        ):
+            with pytest.raises(RetrievalError) as exc_info:
+                retriever.get_related_facts("test topic", top_n=5)
+
+            assert "Failed to convert facts" in str(exc_info.value)
