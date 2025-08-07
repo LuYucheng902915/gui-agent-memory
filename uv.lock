@@ -469,13 +469,12 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "chromadb" },
-    { name = "httpx" },
     { name = "jieba" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "pysqlite3-binary", marker = "sys_platform != 'win32'" },
     { name = "python-dotenv" },
-    { name = "typing-extensions" },
+    { name = "requests" },
 ]
 
 [package.dev-dependencies]
@@ -491,13 +490,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "chromadb", specifier = ">=0.4.0" },
-    { name = "httpx", specifier = ">=0.24.0" },
     { name = "jieba", specifier = ">=0.42.1" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pysqlite3-binary", marker = "sys_platform != 'win32'", specifier = ">=0.5.4" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "typing-extensions", specifier = ">=4.5.0" },
+    { name = "requests", specifier = ">=2.25.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -507,7 +505,7 @@ dev = [
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-cov", specifier = ">=4.0.0" },
     { name = "ruff", specifier = ">=0.6.0" },
-    { name = "types-requests", specifier = ">=2.31.0" },
+    { name = "types-requests", specifier = ">=2.32.4.20250611" },
 ]
 
 [[package]]
