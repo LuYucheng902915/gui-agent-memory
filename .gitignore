@@ -146,5 +146,5 @@ Thumbs.db
 chroma/
 .chroma/
 
-# Test logs
-test_logs/
+# Test data
+test_data/

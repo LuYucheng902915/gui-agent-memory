@@ -417,14 +417,16 @@ class TestMemoryStorageAdvanced:
 
         with patch("gui_agent_memory.storage.get_config") as mock_get_config:
             mock_config = MagicMock()
-            mock_config.chroma_db_path = "./test_db"  # Use a valid relative path
+            mock_config.chroma_db_path = (
+                "./test_data/test_db"  # Use a valid relative path
+            )
             mock_get_config.return_value = mock_config
 
             MemoryStorage()
 
             # Verify client was initialized with custom path (just check path argument)
             call_args = mock_chromadb.PersistentClient.call_args
-            assert call_args.kwargs["path"] == "./test_db"
+            assert call_args.kwargs["path"] == "./test_data/test_db"
 
     @patch("gui_agent_memory.storage.chromadb")
     def test_collection_creation_with_embedding_function(
