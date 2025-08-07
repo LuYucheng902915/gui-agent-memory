@@ -317,10 +317,10 @@ class TestEnvironmentErrorHandling:
     def test_missing_env_file_handling(self, monkeypatch):
         """Test graceful handling when .env file is missing."""
         # This should not raise an error as dotenv handles missing files gracefully
-        monkeypatch.setenv("GITEE_AI_EMBEDDING_API_KEY", "test-key")
-        monkeypatch.setenv("GITEE_AI_EMBEDDING_BASE_URL", "https://test.com")
-        monkeypatch.setenv("GITEE_AI_RERANKER_API_KEY", "test-key")
-        monkeypatch.setenv("GITEE_AI_RERANKER_BASE_URL", "https://test.com")
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("EMBEDDING_LLM_BASE_URL", "https://test.com")
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("RERANKER_LLM_BASE_URL", "https://test.com")
         monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-key")
         monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test.com")
 
@@ -333,10 +333,10 @@ class TestEnvironmentErrorHandling:
     def test_invalid_numeric_env_values(self, monkeypatch):
         """Test handling of invalid numeric environment values."""
         monkeypatch.setenv("DEFAULT_TOP_K", "not_a_number")
-        monkeypatch.setenv("GITEE_AI_EMBEDDING_API_KEY", "test-key")
-        monkeypatch.setenv("GITEE_AI_EMBEDDING_BASE_URL", "https://test.com")
-        monkeypatch.setenv("GITEE_AI_RERANKER_API_KEY", "test-key")
-        monkeypatch.setenv("GITEE_AI_RERANKER_BASE_URL", "https://test.com")
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("EMBEDDING_LLM_BASE_URL", "https://test.com")
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("RERANKER_LLM_BASE_URL", "https://test.com")
         monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-key")
         monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test.com")
 

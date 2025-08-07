@@ -35,21 +35,13 @@ class MemoryConfig:
         # Initialize logger
         self.logger = logging.getLogger(__name__)
 
-        # Gitee AI Embedding Configuration
-        self.gitee_ai_embedding_base_url = self._get_required_env(
-            "GITEE_AI_EMBEDDING_BASE_URL"
-        )
-        self.gitee_ai_embedding_api_key = self._get_required_env(
-            "GITEE_AI_EMBEDDING_API_KEY"
-        )
+        # Embedding LLM Service (any OpenAI-compatible embedding endpoint)
+        self.embedding_llm_base_url = self._get_required_env("EMBEDDING_LLM_BASE_URL")
+        self.embedding_llm_api_key = self._get_required_env("EMBEDDING_LLM_API_KEY")
 
-        # Gitee AI Reranker Configuration (separate endpoint)
-        self.gitee_ai_reranker_base_url = self._get_required_env(
-            "GITEE_AI_RERANKER_BASE_URL"
-        )
-        self.gitee_ai_reranker_api_key = self._get_required_env(
-            "GITEE_AI_RERANKER_API_KEY"
-        )
+        # Reranker LLM Service (any OpenAI-compatible reranker endpoint)
+        self.reranker_llm_base_url = self._get_required_env("RERANKER_LLM_BASE_URL")
+        self.reranker_llm_api_key = self._get_required_env("RERANKER_LLM_API_KEY")
 
         # Experience LLM Configuration
         self.experience_llm_base_url = self._get_required_env("EXPERIENCE_LLM_BASE_URL")
@@ -103,19 +95,19 @@ class MemoryConfig:
     def _init_clients(self) -> None:
         """Initialize AI service clients."""
         try:
-            # Initialize Gitee AI client for embeddings
-            self.gitee_ai_embedding_client = OpenAI(
-                api_key=self.gitee_ai_embedding_api_key,
-                base_url=self.gitee_ai_embedding_base_url,
+            # Initialize embedding LLM client (OpenAI-compatible)
+            self.embedding_llm_client = OpenAI(
+                api_key=self.embedding_llm_api_key,
+                base_url=self.embedding_llm_base_url,
             )
 
-            # Initialize Gitee AI client for reranker (separate endpoint)
-            self.gitee_ai_reranker_client = OpenAI(
-                api_key=self.gitee_ai_reranker_api_key,
-                base_url=self.gitee_ai_reranker_base_url,
+            # Initialize reranker LLM client (OpenAI-compatible)
+            self.reranker_llm_client = OpenAI(
+                api_key=self.reranker_llm_api_key,
+                base_url=self.reranker_llm_base_url,
             )
 
-            # Initialize Experience LLM client
+            # Initialize Experience LLM client (OpenAI-compatible)
             self.experience_llm_client = OpenAI(
                 api_key=self.experience_llm_api_key,
                 base_url=self.experience_llm_base_url,
@@ -127,12 +119,12 @@ class MemoryConfig:
             ) from e
 
     def get_embedding_client(self) -> OpenAI:
-        """Get the embedding client (Gitee AI)."""
-        return self.gitee_ai_embedding_client
+        """Get the embedding LLM client (OpenAI-compatible)."""
+        return self.embedding_llm_client
 
     def get_reranker_client(self) -> OpenAI:
-        """Get the reranker client (Gitee AI)."""
-        return self.gitee_ai_reranker_client
+        """Get the reranker LLM client (OpenAI-compatible)."""
+        return self.reranker_llm_client
 
     def get_experience_llm_client(self) -> OpenAI:
         """Get the experience distillation LLM client."""
@@ -150,18 +142,18 @@ class MemoryConfig:
         """
         try:
             # Test embedding client
-            self.gitee_ai_embedding_client.models.list()
+            self.embedding_llm_client.models.list()
 
             # Test reranker client - try models.list() first, fallback to actual API call
             try:
-                self.gitee_ai_reranker_client.models.list()
+                self.reranker_llm_client.models.list()
             except Exception:
                 # If models.list() fails, test with actual reranker API call
                 try:
                     import requests
 
                     response = requests.post(
-                        self.gitee_ai_reranker_base_url,
+                        self.reranker_llm_base_url,
                         json={
                             "query": "test",
                             "documents": ["test document"],
@@ -169,7 +161,7 @@ class MemoryConfig:
                         },
                         headers={
                             "X-Failover-Enabled": "true",
-                            "Authorization": f"Bearer {self.gitee_ai_reranker_api_key}",
+                            "Authorization": f"Bearer {self.reranker_llm_api_key}",
                             "Content-Type": "application/json",
                         },
                         timeout=10,

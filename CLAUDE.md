@@ -169,16 +169,19 @@ All API keys and sensitive configurations are loaded from a `.env` file in the p
 
 **`.env` Example:**
 ```env
-# Gitee AI service for Embeddings
-GITEE_AI_EMBEDDING_BASE_URL="https://ai.gitee.com/v1"
-GITEE_AI_EMBEDDING_API_KEY="your_gitee_embedding_api_key"
+# Embedding LLM service (any OpenAI-compatible embedding endpoint)
+# Example: "https://api.example.com/v1"
+EMBEDDING_LLM_BASE_URL="<your-embedding-llm-base-url>"
+EMBEDDING_LLM_API_KEY="<your-embedding-llm-api-key>"
 
-# Gitee AI service for Reranking
-GITEE_AI_RERANKER_BASE_URL="https://ai.gitee.com/v1/rerank"
-GITEE_AI_RERANKER_API_KEY="your_gitee_reranker_api_key"
+# Reranker LLM service (any OpenAI-compatible reranker endpoint)
+# Example: "https://api.example.com/v1/rerank"
+RERANKER_LLM_BASE_URL="<your-reranker-llm-base-url>"
+RERANKER_LLM_API_KEY="<your-reranker-llm-api-key>"
 
-# Conversational LLM service for experience distillation
-EXPERIENCE_LLM_BASE_URL="https://poloai.top/v1"
-EXPERIENCE_LLM_API_KEY="your_experience_llm_api_key"
+# Conversational LLM service for experience distillation (OpenAI-compatible)
+# Example: "https://api.example.com/v1"
+EXPERIENCE_LLM_BASE_URL="<your-experience-llm-base-url>"
+EXPERIENCE_LLM_API_KEY="<your-experience-llm-api-key>"
 ```
 The `config.py` module implements a "fail-fast" strategy, raising a `ConfigurationError` if any required environment variable is missing.

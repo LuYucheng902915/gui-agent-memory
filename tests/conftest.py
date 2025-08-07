@@ -22,14 +22,12 @@ from unittest.mock import Mock
 import pytest
 
 # Set up FAKE environment variables for all tests - DO NOT USE REAL API KEYS!
+os.environ.setdefault("EMBEDDING_LLM_BASE_URL", "https://test-embedding.example.com/v1")
+os.environ.setdefault("EMBEDDING_LLM_API_KEY", "test-fake-embedding-key-12345")
 os.environ.setdefault(
-    "GITEE_AI_EMBEDDING_BASE_URL", "https://test-embedding.example.com/v1"
+    "RERANKER_LLM_BASE_URL", "https://test-reranker.example.com/v1/rerank"
 )
-os.environ.setdefault("GITEE_AI_EMBEDDING_API_KEY", "test-fake-embedding-key-12345")
-os.environ.setdefault(
-    "GITEE_AI_RERANKER_BASE_URL", "https://test-reranker.example.com/v1/rerank"
-)
-os.environ.setdefault("GITEE_AI_RERANKER_API_KEY", "test-fake-reranker-key-67890")
+os.environ.setdefault("RERANKER_LLM_API_KEY", "test-fake-reranker-key-67890")
 os.environ.setdefault("EXPERIENCE_LLM_BASE_URL", "https://test-llm.example.com/v1")
 os.environ.setdefault("EXPERIENCE_LLM_API_KEY", "test-fake-llm-key-abcdef")
 
@@ -38,10 +36,10 @@ os.environ.setdefault("EXPERIENCE_LLM_API_KEY", "test-fake-llm-key-abcdef")
 def mock_config():
     """Mock configuration for testing."""
     config = Mock()
-    config.gitee_ai_embedding_base_url = "https://test-ai.example.com/v1"
-    config.gitee_ai_embedding_api_key = "test_gitee_key"
-    config.gitee_ai_reranker_base_url = "https://ai.gitee.com/v1/rerank"
-    config.gitee_ai_reranker_api_key = "test_gitee_key"
+    config.embedding_llm_base_url = "https://test-ai.example.com/v1"
+    config.embedding_llm_api_key = "test_gitee_key"
+    config.reranker_llm_base_url = "https://ai.gitee.com/v1/rerank"
+    config.reranker_llm_api_key = "test_gitee_key"
     config.experience_llm_base_url = "https://test-llm.example.com/v1"
     config.experience_llm_api_key = "test_llm_key"
     config.embedding_model = "test-embedding-model"
@@ -63,8 +61,8 @@ def mock_config():
     )  # Add direct reference for test compatibility
 
     # Add reranker configuration attributes
-    config.gitee_ai_reranker_base_url = "https://ai.gitee.com/v1/rerank"
-    config.gitee_ai_reranker_api_key = "test_gitee_key"
+    config.reranker_llm_base_url = "https://ai.gitee.com/v1/rerank"
+    config.reranker_llm_api_key = "test_gitee_key"
     config.reranker_model = "test-reranker-model"
 
     config.get_embedding_client = Mock(return_value=config.gitee_ai_client)
@@ -316,14 +314,12 @@ class TestEnvironment:
     @staticmethod
     def setup_test_env():
         """Setup FAKE test environment variables - DO NOT USE REAL API KEYS!"""
-        os.environ["GITEE_AI_EMBEDDING_BASE_URL"] = (
-            "https://test-embedding.example.com/v1"
-        )
-        os.environ["GITEE_AI_EMBEDDING_API_KEY"] = "test-fake-embedding-key-12345"
-        os.environ["GITEE_AI_RERANKER_BASE_URL"] = (
+        os.environ["EMBEDDING_LLM_BASE_URL"] = "https://test-embedding.example.com/v1"
+        os.environ["EMBEDDING_LLM_API_KEY"] = "test-fake-embedding-key-12345"
+        os.environ["RERANKER_LLM_BASE_URL"] = (
             "https://test-reranker.example.com/v1/rerank"
         )
-        os.environ["GITEE_AI_RERANKER_API_KEY"] = "test-fake-reranker-key-67890"
+        os.environ["RERANKER_LLM_API_KEY"] = "test-fake-reranker-key-67890"
         os.environ["EXPERIENCE_LLM_BASE_URL"] = "https://test-llm.example.com/v1"
         os.environ["EXPERIENCE_LLM_API_KEY"] = "test-fake-llm-key-abcdef"
         os.environ["CHROMA_DB_PATH"] = "./test_data/chroma"
@@ -332,10 +328,10 @@ class TestEnvironment:
     def cleanup_test_env():
         """Clean up test environment."""
         test_vars = [
-            "GITEE_AI_EMBEDDING_BASE_URL",
-            "GITEE_AI_EMBEDDING_API_KEY",
-            "GITEE_AI_RERANKER_BASE_URL",
-            "GITEE_AI_RERANKER_API_KEY",
+            "EMBEDDING_LLM_BASE_URL",
+            "EMBEDDING_LLM_API_KEY",
+            "RERANKER_LLM_BASE_URL",
+            "RERANKER_LLM_API_KEY",
             "EXPERIENCE_LLM_BASE_URL",
             "EXPERIENCE_LLM_API_KEY",
             "CHROMA_DB_PATH",

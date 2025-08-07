@@ -86,7 +86,7 @@ class MemoryIngestion:
 
     def _generate_embedding(self, text: str) -> list[float]:
         """
-        Generate embedding for the given text using Gitee AI.
+        Generate embedding for the given text using an OpenAI-compatible embedding service.
 
         Args:
             text: Text to embed

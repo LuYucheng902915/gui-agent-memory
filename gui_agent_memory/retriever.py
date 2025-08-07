@@ -487,9 +487,10 @@ class MemoryRetriever:
             documents = [result["document"] for result in candidates]
 
             # Use requests to call the reranker API directly (as per official docs)
+
             headers = {
                 "X-Failover-Enabled": "true",
-                "Authorization": f"Bearer {self.config.gitee_ai_reranker_api_key}",
+                "Authorization": f"Bearer {self.config.reranker_llm_api_key}",
                 "Content-Type": "application/json",
             }
 
@@ -502,7 +503,7 @@ class MemoryRetriever:
 
             # Call reranker API
             response = requests.post(
-                self.config.gitee_ai_reranker_base_url,
+                self.config.reranker_llm_base_url,
                 headers=headers,
                 json=payload,
                 timeout=30,

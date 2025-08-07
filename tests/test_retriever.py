@@ -209,8 +209,8 @@ class TestMemoryRetriever:
         mock_post.return_value = mock_response
 
         # Mock config
-        mock_config.gitee_ai_reranker_base_url = "https://test-reranker.com"
-        mock_config.gitee_ai_reranker_api_key = "test-key"
+        mock_config.reranker_llm_base_url = "https://test-reranker.com"
+        mock_config.reranker_llm_api_key = "test-key"
         mock_config.reranker_model = "test-model"
 
         # Execute
@@ -234,8 +234,8 @@ class TestMemoryRetriever:
         import requests
 
         mock_post.side_effect = requests.RequestException("API error")
-        mock_config.gitee_ai_reranker_base_url = "https://test-reranker.com"
-        mock_config.gitee_ai_reranker_api_key = "test-key"
+        mock_config.reranker_llm_base_url = "https://test-reranker.com"
+        mock_config.reranker_llm_api_key = "test-key"
         mock_config.reranker_model = "test-model"
 
         # Execute - should not raise exception, should return original order
@@ -257,8 +257,8 @@ class TestMemoryRetriever:
         mock_response.json.return_value = {"invalid": "format"}
         mock_post.return_value = mock_response
 
-        mock_config.gitee_ai_reranker_base_url = "https://test-reranker.com"
-        mock_config.gitee_ai_reranker_api_key = "test-key"
+        mock_config.reranker_llm_base_url = "https://test-reranker.com"
+        mock_config.reranker_llm_api_key = "test-key"
         mock_config.reranker_model = "test-model"
 
         # Execute - should fallback gracefully
@@ -670,8 +670,8 @@ class TestMemoryRetrieverAdvanced:
         ]
 
         # Mock config for reranker
-        mock_config.gitee_ai_reranker_base_url = "https://test-reranker.com"
-        mock_config.gitee_ai_reranker_api_key = "test-key"
+        mock_config.reranker_llm_base_url = "https://test-reranker.com"
+        mock_config.reranker_llm_api_key = "test-key"
         mock_config.reranker_model = "test-model"
 
         # Mock requests.post to raise an HTTP error

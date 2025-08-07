@@ -25,15 +25,14 @@ class TestMemoryConfig:
 
             # Test with FAKE test environment values - NOT real API keys!
             assert (
-                config.gitee_ai_embedding_base_url
-                == "https://test-embedding.example.com/v1"
+                config.embedding_llm_base_url == "https://test-embedding.example.com/v1"
             )
-            assert config.gitee_ai_embedding_api_key == "test-fake-embedding-key-12345"
+            assert config.embedding_llm_api_key == "test-fake-embedding-key-12345"
             assert (
-                config.gitee_ai_reranker_base_url
+                config.reranker_llm_base_url
                 == "https://test-reranker.example.com/v1/rerank"
             )
-            assert config.gitee_ai_reranker_api_key == "test-fake-reranker-key-67890"
+            assert config.reranker_llm_api_key == "test-fake-reranker-key-67890"
             assert config.experience_llm_base_url == "https://test-llm.example.com/v1"
             assert config.experience_llm_api_key == "test-fake-llm-key-abcdef"
             assert config.embedding_model == "Qwen3-Embedding-8B"
@@ -46,10 +45,10 @@ class TestMemoryConfig:
 
         def mock_getenv(key, default=None):
             if key in [
-                "GITEE_AI_EMBEDDING_API_KEY",
-                "GITEE_AI_EMBEDDING_BASE_URL",
-                "GITEE_AI_RERANKER_API_KEY",
-                "GITEE_AI_RERANKER_BASE_URL",
+                "EMBEDDING_LLM_API_KEY",
+                "EMBEDDING_LLM_BASE_URL",
+                "RERANKER_LLM_API_KEY",
+                "RERANKER_LLM_BASE_URL",
                 "EXPERIENCE_LLM_API_KEY",
                 "EXPERIENCE_LLM_BASE_URL",
             ]:
@@ -71,12 +70,10 @@ class TestMemoryConfig:
     def test_config_client_initialization_failure(self, monkeypatch):
         """Test configuration failure during client initialization."""
         # Set required env vars
-        monkeypatch.setenv("GITEE_AI_EMBEDDING_API_KEY", "test-key")
-        monkeypatch.setenv("GITEE_AI_EMBEDDING_BASE_URL", "https://ai.gitee.com/v1")
-        monkeypatch.setenv("GITEE_AI_RERANKER_API_KEY", "test-key")
-        monkeypatch.setenv(
-            "GITEE_AI_RERANKER_BASE_URL", "https://ai.gitee.com/v1/rerank"
-        )
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("EMBEDDING_LLM_BASE_URL", "https://ai.gitee.com/v1")
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("RERANKER_LLM_BASE_URL", "https://ai.gitee.com/v1/rerank")
         monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-key")
         monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://poloai.top/v1")
 
@@ -181,7 +178,7 @@ class TestConfigModule:
         original_getenv = os.getenv
 
         def mock_getenv(key, default=None):
-            if key == "GITEE_AI_EMBEDDING_API_KEY":
+            if key == "EMBEDDING_LLM_API_KEY":
                 return None
             return original_getenv(key, default)
 
