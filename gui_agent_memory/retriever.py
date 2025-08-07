@@ -486,18 +486,18 @@ class MemoryRetriever:
             # Prepare documents for reranking
             documents = [result["document"] for result in candidates]
 
-            # Prepare headers for the request
+            # Use requests to call the reranker API directly (as per official docs)
             headers = {
                 "X-Failover-Enabled": "true",
                 "Authorization": f"Bearer {self.config.gitee_ai_reranker_api_key}",
                 "Content-Type": "application/json",
             }
 
-            # Prepare payload for reranker API
             payload = {
                 "query": query,
                 "documents": documents,
                 "model": self.config.reranker_model,
+                "top_n": top_n,
             }
 
             # Call reranker API
@@ -512,8 +512,8 @@ class MemoryRetriever:
             # Parse reranking results from API response
             api_response = response.json()
 
-            # The reranker API returns ranked results with scores
-            if "results" in api_response:
+            # Parse reranking results from API response
+            if "results" in api_response and isinstance(api_response["results"], list):
                 reranked_results = []
                 for i, result_data in enumerate(api_response["results"][:top_n]):
                     # Get the document index from the API response
@@ -525,6 +525,7 @@ class MemoryRetriever:
                         )
                         reranked_results.append(result)
                 return reranked_results
+
             # Fallback: return original results if API format is unexpected
             for i, result in enumerate(candidates[:top_n]):
                 result["rerank_score"] = 1.0 - i * 0.1
@@ -533,6 +534,9 @@ class MemoryRetriever:
         except Exception as e:
             # Fallback: return original results on reranking failure
             self.logger.warning("Reranking failed, using original order: %s", e)
+            for i, result in enumerate(candidates[:top_n]):
+                result["rerank_score"] = 1.0 - i * 0.1
+            return candidates[:top_n]
             return candidates[:top_n]
 
     def _convert_to_memory_objects(

@@ -8,6 +8,7 @@ This module handles:
 - Fail-fast validation of required settings
 """
 
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -30,6 +31,9 @@ class MemoryConfig:
         """Initialize configuration by loading environment variables."""
         # Load environment variables from .env file if it exists
         load_dotenv()
+
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
 
         # Gitee AI Embedding Configuration
         self.gitee_ai_embedding_base_url = self._get_required_env(
@@ -148,8 +152,39 @@ class MemoryConfig:
             # Test embedding client
             self.gitee_ai_embedding_client.models.list()
 
-            # Test reranker client
-            self.gitee_ai_reranker_client.models.list()
+            # Test reranker client - try models.list() first, fallback to actual API call
+            try:
+                self.gitee_ai_reranker_client.models.list()
+            except Exception:
+                # If models.list() fails, test with actual reranker API call
+                try:
+                    import requests
+
+                    response = requests.post(
+                        self.gitee_ai_reranker_base_url,
+                        json={
+                            "query": "test",
+                            "documents": ["test document"],
+                            "model": self.reranker_model,
+                        },
+                        headers={
+                            "X-Failover-Enabled": "true",
+                            "Authorization": f"Bearer {self.gitee_ai_reranker_api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        timeout=10,
+                    )
+                    # If we get any response (even an error about the model),
+                    # it means the API endpoint is reachable
+                    if response.status_code in [200, 400, 422]:
+                        # These status codes indicate the API is working
+                        pass
+                    else:
+                        response.raise_for_status()
+                except Exception as e:
+                    raise ConfigurationError(
+                        f"Reranker API validation failed: {e}"
+                    ) from e
 
             # Test experience LLM client
             self.experience_llm_client.models.list()

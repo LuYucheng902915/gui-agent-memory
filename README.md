@@ -205,9 +205,27 @@ uv run pre-commit run --all-files
 
 ### MemorySystem 类
 
-- `retrieve_memories(query: str, top_n: int = 3)` - 检索相关的经验和事实
-- `learn_from_task(raw_history: dict, is_successful: bool, source_task_id: str, ...)` - 从原始任务历史中学习并存储为经验
-- `add_fact(fact: dict)` - 存储一个结构化的事实记录
+#### 核心检索功能
+- `retrieve_memories(query: str, top_n: int = 3) -> RetrievalResult` - 检索相关的经验和事实（主要检索接口）
+  - **参数说明**: `top_n` 表示**每种类型**最多返回的结果数量，即最多返回 `top_n` 个经验记录 + `top_n` 个事实记录
+
+#### 学习和添加功能
+- `learn_from_task(raw_history: list[dict], is_successful: bool, source_task_id: str, app_name: str = "", task_description: str = "") -> str` - 从原始任务历史中学习并存储为经验
+- `add_experience(experience: ExperienceRecord) -> str` - 添加预结构化的经验记录
+- `add_fact(content: str, keywords: list[str], source: str = "manual") -> str` - 添加语义事实
+- `batch_add_facts(facts_data: list[dict]) -> list[str]` - 批量添加多个事实
+
+#### 专门检索功能
+- `get_similar_experiences(task_description: str, top_n: int = 5) -> list[ExperienceRecord]` - 获取相似的经验记录
+- `get_related_facts(topic: str, top_n: int = 5) -> list[FactRecord]` - 获取相关的事实记录
+
+#### 系统管理功能
+- `get_system_stats() -> dict[str, Any]` - 获取系统统计信息
+- `validate_system() -> bool` - 验证系统配置和运行状态
+- `clear_all_memories() -> str` - 清除所有存储的记忆（测试用途）
+
+#### 便捷函数
+- `create_memory_system() -> MemorySystem` - 创建和初始化记忆系统实例
 
 详细API文档请参考代码中的docstring。
 
