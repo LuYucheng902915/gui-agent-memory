@@ -111,6 +111,7 @@ markers = [
 [tool.coverage.run]
 source = ["gui_agent_memory"]
 omit = ["tests/*"]
+data_file = "test_data/.coverage"
 
 [tool.coverage.report]
 show_missing = true

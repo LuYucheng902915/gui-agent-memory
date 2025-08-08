@@ -129,7 +129,6 @@ dmypy.json
 memory_system/
 
 # IDE / Editor specific
-.vscode/
 .idea/
 .claude/
 
