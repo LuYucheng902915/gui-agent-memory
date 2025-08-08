@@ -51,7 +51,9 @@ class MemorySystem:
         except Exception as e:
             raise MemorySystemError(f"Failed to initialize memory system: {e}") from e
 
-    def retrieve_memories(self, query: str, top_n: int = 3) -> RetrievalResult:
+    def retrieve_memories(
+        self, query: str, top_n: int | None = None
+    ) -> RetrievalResult:
         """
         Retrieve relevant memories based on a query.
 
@@ -78,6 +80,9 @@ class MemorySystem:
         """
         if not query or not query.strip():
             raise MemorySystemError("Query cannot be empty")
+
+        if top_n is None:
+            top_n = self.config.default_top_n
 
         try:
             return self.retriever.retrieve_memories(query, top_n)
@@ -267,7 +272,7 @@ class MemorySystem:
             raise MemorySystemError(f"Batch adding facts failed: {e}") from e
 
     def get_similar_experiences(
-        self, task_description: str, top_n: int = 5
+        self, task_description: str, top_n: int | None = None
     ) -> list[ExperienceRecord]:
         """
         Get experiences similar to a given task description.
@@ -286,11 +291,15 @@ class MemorySystem:
             raise MemorySystemError("Task description cannot be empty")
 
         try:
+            if top_n is None:
+                top_n = self.config.default_top_n
             return self.retriever.get_similar_experiences(task_description, top_n)
         except RetrievalError as e:
             raise MemorySystemError(f"Getting similar experiences failed: {e}") from e
 
-    def get_related_facts(self, topic: str, top_n: int = 5) -> list[FactRecord]:
+    def get_related_facts(
+        self, topic: str, top_n: int | None = None
+    ) -> list[FactRecord]:
         """
         Get facts related to a specific topic.
 
@@ -308,6 +317,8 @@ class MemorySystem:
             raise MemorySystemError("Topic cannot be empty")
 
         try:
+            if top_n is None:
+                top_n = self.config.default_top_n
             return self.retriever.get_related_facts(topic, top_n)
         except RetrievalError as e:
             raise MemorySystemError(f"Getting related facts failed: {e}") from e

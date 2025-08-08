@@ -119,7 +119,7 @@ def demonstrate_fact_management(memory: MemorySystem):
 
     for query in test_queries:
         try:
-            related_facts = memory.get_related_facts(query, top_n=3)
+            related_facts = memory.get_related_facts(query)
             print(f"\n🔍 查询: '{query}' (找到 {len(related_facts)} 条相关事实)")
             for i, fact in enumerate(related_facts):
                 print(f"   {i + 1}. {fact.content[:60]}...")
@@ -287,12 +287,12 @@ def demonstrate_experience_retrieval(memory: MemorySystem):
 
     for query in experience_queries:
         try:
-            similar_experiences = memory.get_similar_experiences(query, top_n=3)
+            similar_experiences = memory.get_similar_experiences(query)
             print(f"\n🔍 查询: '{query}' (找到 {len(similar_experiences)} 个相似经验)")
             for i, exp in enumerate(similar_experiences):
                 print(f"   {i + 1}. {exp.task_description}")
                 print(
-                    f"      成功: {'是' if exp.is_successful else '否'} | 关键词: {', '.join(exp.keywords[:3])}"
+                    f"      成功: {'是' if exp.is_successful else '否'} | 关键词: {', '.join(exp.keywords)}"
                 )
                 print(f"      关键步骤: {len(exp.action_flow)} 步")
         except Exception as e:
@@ -317,7 +317,7 @@ def demonstrate_comprehensive_retrieval(memory: MemorySystem):
     for query in complex_queries:
         try:
             print(f"\n🔍 综合查询: '{query}'")
-            retrieval_result = memory.retrieve_memories(query, top_n=3)
+            retrieval_result = memory.retrieve_memories(query)
 
             print(f"   📚 找到 {len(retrieval_result.experiences)} 个相关经验:")
             for i, exp in enumerate(retrieval_result.experiences):
@@ -402,7 +402,7 @@ def demonstrate_performance_scenarios(memory: MemorySystem):
     for query in test_queries:
         try:
             start_time = time.time()
-            result = memory.retrieve_memories(query, top_n=5)
+            result = memory.retrieve_memories(query)
             query_time = time.time() - start_time
             total_retrieval_time += query_time
             successful_queries += 1

@@ -811,7 +811,9 @@ class MemoryRetriever:
 
         return reranked_experiences, reranked_facts
 
-    def retrieve_memories(self, query: str, top_n: int = 3) -> RetrievalResult:
+    def retrieve_memories(
+        self, query: str, top_n: int | None = None
+    ) -> RetrievalResult:
         """
         Retrieve relevant memories using hybrid search and reranking.
 
@@ -826,6 +828,9 @@ class MemoryRetriever:
             RetrievalError: If retrieval process fails
         """
         try:
+            if top_n is None:
+                top_n = self.config.default_top_n
+
             # Prepare query components
             query_embedding = self._generate_query_embedding(query)
             query_keywords = self._extract_query_keywords(query)
@@ -868,7 +873,7 @@ class MemoryRetriever:
         )
 
     def get_similar_experiences(
-        self, task_description: str, top_n: int = 5
+        self, task_description: str, top_n: int | None = None
     ) -> list[ExperienceRecord]:
         """
         Get experiences similar to a given task description.
@@ -881,6 +886,8 @@ class MemoryRetriever:
             List of similar experiences
         """
         try:
+            if top_n is None:
+                top_n = self.config.default_top_n
             query_embedding = self._generate_query_embedding(task_description)
             vector_results = self._vector_search_experiences(query_embedding, top_n)
 
@@ -895,7 +902,9 @@ class MemoryRetriever:
         except Exception as e:
             raise RetrievalError(f"Failed to get similar experiences: {e}") from e
 
-    def get_related_facts(self, topic: str, top_n: int = 5) -> list[FactRecord]:
+    def get_related_facts(
+        self, topic: str, top_n: int | None = None
+    ) -> list[FactRecord]:
         """
         Get facts related to a specific topic.
 
@@ -907,6 +916,8 @@ class MemoryRetriever:
             List of related facts
         """
         try:
+            if top_n is None:
+                top_n = self.config.default_top_n
             query_embedding = self._generate_query_embedding(topic)
             vector_results = self._vector_search_facts(query_embedding, top_n)
 

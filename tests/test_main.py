@@ -882,3 +882,158 @@ class TestCreateMemorySystemFunction:
                 create_memory_system()
 
             assert "Failed to initialize memory system" in str(exc_info.value)
+
+
+class TestConfigurationDefaultValues:
+    """Test that configuration default values are properly used."""
+
+    @pytest.fixture
+    def memory_system_with_custom_config(self):
+        """Create MemorySystem with custom configuration."""
+        from unittest.mock import Mock, patch
+
+        from gui_agent_memory.config import MemoryConfig
+
+        # Create a custom config with specific default_top_n
+        custom_config = Mock(spec=MemoryConfig)
+        custom_config.default_top_n = 2
+        custom_config.default_top_k = 15
+        custom_config.embedding_model = "test-model"
+        custom_config.reranker_model = "test-reranker"
+        custom_config.experience_llm_model = "test-llm"
+        custom_config.chroma_db_path = "/test/path"
+
+        with (
+            patch("gui_agent_memory.main.get_config", return_value=custom_config),
+            patch("gui_agent_memory.main.MemoryStorage") as mock_storage_class,
+            patch("gui_agent_memory.main.MemoryIngestion") as mock_ingestion_class,
+            patch("gui_agent_memory.main.MemoryRetriever") as mock_retriever_class,
+        ):
+            mock_storage = Mock()
+            mock_ingestion = Mock()
+            mock_retriever = Mock()
+
+            mock_storage_class.return_value = mock_storage
+            mock_ingestion_class.return_value = mock_ingestion
+            mock_retriever_class.return_value = mock_retriever
+
+            system = MemorySystem()
+            system._mock_storage = mock_storage
+            system._mock_ingestion = mock_ingestion
+            system._mock_retriever = mock_retriever
+
+            yield system
+
+    def test_retrieve_memories_uses_config_default_top_n(
+        self, memory_system_with_custom_config
+    ):
+        """Test that retrieve_memories uses config.default_top_n when top_n not provided."""
+        from gui_agent_memory.models import RetrievalResult
+
+        mock_result = Mock(spec=RetrievalResult)
+        memory_system_with_custom_config._mock_retriever.retrieve_memories.return_value = mock_result
+
+        # Call without providing top_n - should use config.default_top_n (2)
+        result = memory_system_with_custom_config.retrieve_memories("test query")
+
+        assert result == mock_result
+        memory_system_with_custom_config._mock_retriever.retrieve_memories.assert_called_once_with(
+            "test query",
+            2,  # Should use config.default_top_n
+        )
+
+    def test_retrieve_memories_uses_explicit_top_n_when_provided(
+        self, memory_system_with_custom_config
+    ):
+        """Test that retrieve_memories uses explicit top_n when provided."""
+        from gui_agent_memory.models import RetrievalResult
+
+        mock_result = Mock(spec=RetrievalResult)
+        memory_system_with_custom_config._mock_retriever.retrieve_memories.return_value = mock_result
+
+        # Call with explicit top_n - should use the provided value
+        result = memory_system_with_custom_config.retrieve_memories(
+            "test query", top_n=7
+        )
+
+        assert result == mock_result
+        memory_system_with_custom_config._mock_retriever.retrieve_memories.assert_called_once_with(
+            "test query",
+            7,  # Should use explicit value
+        )
+
+    def test_get_similar_experiences_uses_config_default_top_n(
+        self, memory_system_with_custom_config
+    ):
+        """Test that get_similar_experiences uses config.default_top_n when top_n not provided."""
+        from gui_agent_memory.models import ExperienceRecord
+
+        mock_experiences = [Mock(spec=ExperienceRecord)]
+        memory_system_with_custom_config._mock_retriever.get_similar_experiences.return_value = mock_experiences
+
+        # Call without providing top_n - should use config.default_top_n (2)
+        result = memory_system_with_custom_config.get_similar_experiences("test task")
+
+        assert result == mock_experiences
+        memory_system_with_custom_config._mock_retriever.get_similar_experiences.assert_called_once_with(
+            "test task",
+            2,  # Should use config.default_top_n
+        )
+
+    def test_get_similar_experiences_uses_explicit_top_n_when_provided(
+        self, memory_system_with_custom_config
+    ):
+        """Test that get_similar_experiences uses explicit top_n when provided."""
+        from gui_agent_memory.models import ExperienceRecord
+
+        mock_experiences = [Mock(spec=ExperienceRecord)]
+        memory_system_with_custom_config._mock_retriever.get_similar_experiences.return_value = mock_experiences
+
+        # Call with explicit top_n - should use the provided value
+        result = memory_system_with_custom_config.get_similar_experiences(
+            "test task", top_n=8
+        )
+
+        assert result == mock_experiences
+        memory_system_with_custom_config._mock_retriever.get_similar_experiences.assert_called_once_with(
+            "test task",
+            8,  # Should use explicit value
+        )
+
+    def test_get_related_facts_uses_config_default_top_n(
+        self, memory_system_with_custom_config
+    ):
+        """Test that get_related_facts uses config.default_top_n when top_n not provided."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_facts = [Mock(spec=FactRecord)]
+        memory_system_with_custom_config._mock_retriever.get_related_facts.return_value = mock_facts
+
+        # Call without providing top_n - should use config.default_top_n (2)
+        result = memory_system_with_custom_config.get_related_facts("test topic")
+
+        assert result == mock_facts
+        memory_system_with_custom_config._mock_retriever.get_related_facts.assert_called_once_with(
+            "test topic",
+            2,  # Should use config.default_top_n
+        )
+
+    def test_get_related_facts_uses_explicit_top_n_when_provided(
+        self, memory_system_with_custom_config
+    ):
+        """Test that get_related_facts uses explicit top_n when provided."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_facts = [Mock(spec=FactRecord)]
+        memory_system_with_custom_config._mock_retriever.get_related_facts.return_value = mock_facts
+
+        # Call with explicit top_n - should use the provided value
+        result = memory_system_with_custom_config.get_related_facts(
+            "test topic", top_n=9
+        )
+
+        assert result == mock_facts
+        memory_system_with_custom_config._mock_retriever.get_related_facts.assert_called_once_with(
+            "test topic",
+            9,  # Should use explicit value
+        )

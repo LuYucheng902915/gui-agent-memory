@@ -87,17 +87,55 @@ class TestMemoryConfig:
 
             assert "Failed to initialize AI service clients" in str(exc_info.value)
 
-    def test_config_default_values(self, mock_openai_client):
+    def test_config_default_values(self, monkeypatch, mock_openai_client):
         """Test that default configuration values are set correctly."""
-        with patch("gui_agent_memory.config.OpenAI", return_value=mock_openai_client):
-            config = MemoryConfig()
 
-            assert config.embedding_model == "Qwen3-Embedding-8B"
-            assert config.reranker_model == "Qwen3-Reranker-8B"
-            assert config.experience_llm_model == "gpt-4o"
-            assert config.default_top_k == 20
-            assert config.default_top_n == 3
-            assert config.embedding_dimension == 1024
+        # Mock os.getenv to return None for all config variables, forcing use of hardcoded defaults
+        def mock_getenv(key, default=None):
+            # Return required env vars for successful initialization
+            if key == "EMBEDDING_LLM_BASE_URL":
+                return "https://test-embedding.example.com/v1"
+            elif key == "EMBEDDING_LLM_API_KEY":
+                return "test-fake-embedding-key-12345"
+            elif key == "RERANKER_LLM_BASE_URL":
+                return "https://test-reranker.example.com/v1/rerank"
+            elif key == "RERANKER_LLM_API_KEY":
+                return "test-fake-reranker-key-67890"
+            elif key == "EXPERIENCE_LLM_BASE_URL":
+                return "https://test-llm.example.com/v1"
+            elif key == "EXPERIENCE_LLM_API_KEY":
+                return "test-fake-llm-key-abcdef"
+            # For optional config vars, return None to use hardcoded defaults
+            elif key in [
+                "EMBEDDING_MODEL",
+                "RERANKER_MODEL",
+                "EXPERIENCE_LLM_MODEL",
+                "DEFAULT_TOP_K",
+                "DEFAULT_TOP_N",
+                "EMBEDDING_DIMENSION",
+                "CHROMA_DB_PATH",
+                "FAILED_LEARNING_LOG_PATH",
+            ]:
+                return default
+            else:
+                return default
+
+        monkeypatch.setattr(os, "getenv", mock_getenv)
+        # Mock load_dotenv to prevent loading the real .env file
+        with patch("gui_agent_memory.config.load_dotenv"):
+            with patch(
+                "gui_agent_memory.config.OpenAI", return_value=mock_openai_client
+            ):
+                config = MemoryConfig()
+
+                assert config.embedding_model == "Qwen3-Embedding-8B"
+                assert config.reranker_model == "Qwen3-Reranker-8B"
+                assert config.experience_llm_model == "gpt-4o"
+                assert config.default_top_k == 20
+                assert (
+                    config.default_top_n == 3
+                )  # This should be the actual default from config.py
+                assert config.embedding_dimension == 1024
 
     def test_config_custom_env_values(self, monkeypatch, mock_openai_client):
         """Test configuration with custom environment values."""
