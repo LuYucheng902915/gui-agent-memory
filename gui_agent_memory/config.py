@@ -12,6 +12,7 @@ Implemented with pydantic-settings for declarative env parsing and validation.
 
 import logging
 import os
+import threading
 from typing import Any
 
 from openai import OpenAI
@@ -262,6 +263,7 @@ class MemoryConfig(BaseSettings):
 
 # Global configuration instance
 _config: MemoryConfig | None = None
+_config_lock = threading.RLock()
 
 
 def get_config() -> MemoryConfig:
@@ -276,11 +278,21 @@ def get_config() -> MemoryConfig:
     """
     global _config
     if _config is None:
-        _config = MemoryConfig()
+        with _config_lock:
+            if _config is None:
+                _config = MemoryConfig()
     return _config
 
 
 def reset_config() -> None:
     """Reset the global configuration instance (mainly for testing)."""
     global _config
-    _config = None
+    with _config_lock:
+        _config = None
+
+
+def set_config(new_config: MemoryConfig | None) -> None:
+    """Explicitly inject a configuration instance (for DI or specialized runs)."""
+    global _config
+    with _config_lock:
+        _config = new_config

@@ -30,7 +30,13 @@ class MemorySystem:
     - Managing the memory system configuration
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        storage: MemoryStorage | None = None,
+        ingestion: MemoryIngestion | None = None,
+        retriever: MemoryRetriever | None = None,
+        config=None,
+    ) -> None:
         """
         Initialize the memory system.
 
@@ -40,12 +46,12 @@ class MemorySystem:
         """
         try:
             # Initialize configuration (includes validation)
-            self.config = get_config()
+            self.config = config or get_config()
 
-            # Initialize core components
-            self.storage = MemoryStorage()
-            self.ingestion = MemoryIngestion()
-            self.retriever = MemoryRetriever()
+            # Initialize core components with DI-friendly constructors
+            self.storage = storage or MemoryStorage(self.config)
+            self.ingestion = ingestion or MemoryIngestion(self.storage, self.config)
+            self.retriever = retriever or MemoryRetriever(None, self.config)
 
         except ConfigurationError:
             raise  # Re-raise configuration errors directly

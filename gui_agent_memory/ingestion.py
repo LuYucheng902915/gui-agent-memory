@@ -38,14 +38,14 @@ class MemoryIngestion:
     and their storage with appropriate embeddings.
     """
 
-    def __init__(self, storage: MemoryStorage | None = None) -> None:
+    def __init__(self, storage: MemoryStorage | None = None, config=None) -> None:
         """Initialize the ingestion system.
 
         Args:
             storage: Optional injected storage (used in tests)
         """
-        self.config = get_config()
-        self.storage = storage or MemoryStorage()
+        self.config = config or get_config()
+        self.storage = storage or MemoryStorage(self.config)
 
         # Setup logging
         self._setup_logging()

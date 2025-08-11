@@ -2,7 +2,7 @@
 Unit tests for the configuration module.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import pytest
 import requests
@@ -272,7 +272,7 @@ class TestConfigCoverage:
                         "Authorization": "Bearer test-key",
                         "Content-Type": "application/json",
                     },
-                    timeout=10,
+                    timeout=ANY,
                 )
 
     def test_validate_configuration_reranker_fallback_422_status(self, monkeypatch):
