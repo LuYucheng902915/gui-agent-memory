@@ -64,7 +64,7 @@ class MemoryStorage:
             self.client = chromadb.PersistentClient(
                 path=self.config.chroma_db_path,
                 settings=Settings(
-                    anonymized_telemetry=False,
+                    anonymized_telemetry=self.config.chroma_anonymized_telemetry,
                 ),
             )
         except Exception as e:

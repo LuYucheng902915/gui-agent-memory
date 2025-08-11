@@ -129,6 +129,7 @@ class TestIngestionErrorHandling:
         mock_config.failed_learning_log_path = (
             "./test_data/test_logs/failed_learning.jsonl"
         )
+        mock_config.prompt_templates_dir = ""
         mock_get_config.return_value = mock_config
 
         mock_storage = Mock()
@@ -154,6 +155,7 @@ class TestIngestionErrorHandling:
         mock_config.failed_learning_log_path = (
             "./test_data/test_logs/failed_learning.jsonl"
         )
+        mock_config.prompt_templates_dir = ""
         mock_get_config.return_value = mock_config
 
         mock_storage = Mock()
@@ -189,6 +191,7 @@ class TestIngestionErrorHandling:
         mock_config.failed_learning_log_path = (
             "./test_data/test_logs/failed_learning.jsonl"
         )
+        mock_config.prompt_templates_dir = ""
         mock_get_config.return_value = mock_config
 
         mock_storage = Mock()

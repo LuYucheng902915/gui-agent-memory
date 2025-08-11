@@ -239,6 +239,33 @@ class TestMemoryIngestion:
             assert ingestion.experience_distillation_prompt == experience_prompt
             assert ingestion.keyword_extraction_prompt == keyword_prompt
 
+    def test_prompt_template_loading_from_external_dir(
+        self, mock_config, mock_storage, tmp_path
+    ):
+        """Test loading prompt templates from PROMPT_TEMPLATES_DIR when configured."""
+        # Create temporary template files
+        ext_dir = tmp_path / "prompts"
+        ext_dir.mkdir(parents=True)
+        (ext_dir / "experience_distillation.txt").write_text(
+            "EXT experience: {raw_history}", encoding="utf-8"
+        )
+        (ext_dir / "keyword_extraction.txt").write_text(
+            "EXT keyword: {text}", encoding="utf-8"
+        )
+
+        mock_config.prompt_templates_dir = str(ext_dir)
+
+        with (
+            patch("gui_agent_memory.ingestion.get_config", return_value=mock_config),
+            patch(
+                "gui_agent_memory.ingestion.MemoryStorage", return_value=mock_storage
+            ),
+        ):
+            ingestion = MemoryIngestion()
+
+            assert ingestion.experience_distillation_prompt.startswith("EXT experience")
+            assert ingestion.keyword_extraction_prompt.startswith("EXT keyword")
+
     def test_prompt_template_loading_failure(self, mock_config, mock_storage):
         """Test error handling when prompt templates fail to load."""
         from gui_agent_memory.ingestion import IngestionError

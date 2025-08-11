@@ -70,18 +70,21 @@ class MemoryIngestion:
     def _load_prompts(self) -> None:
         """Load prompt templates from files."""
         try:
+            # Prefer external templates if configured; otherwise use packaged defaults
+            templates_dir = getattr(self.config, "prompt_templates_dir", "")
+            if templates_dir and isinstance(templates_dir, str):
+                base = Path(templates_dir)
+            else:
+                base = Path(__file__).parent / "prompts"
+
             # Load experience distillation prompt
-            experience_prompt_path = (
-                Path(__file__).parent / "prompts" / "experience_distillation.txt"
-            )
+            experience_prompt_path = base / "experience_distillation.txt"
             self.experience_distillation_prompt = experience_prompt_path.read_text(
                 encoding="utf-8"
             )
 
             # Load keyword extraction prompt
-            keyword_prompt_path = (
-                Path(__file__).parent / "prompts" / "keyword_extraction.txt"
-            )
+            keyword_prompt_path = base / "keyword_extraction.txt"
             self.keyword_extraction_prompt = keyword_prompt_path.read_text(
                 encoding="utf-8"
             )

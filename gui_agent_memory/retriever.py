@@ -15,7 +15,7 @@ from typing import Any
 import jieba
 import requests
 
-from .config import get_config
+from .config import MemoryConfig, get_config
 from .models import ActionStep, ExperienceRecord, FactRecord, RetrievalResult
 from .storage import MemoryStorage
 
@@ -35,10 +35,12 @@ class MemoryRetriever:
     then applies re-ranking for optimal result quality.
     """
 
-    def __init__(self) -> None:
-        """Initialize the retrieval system."""
-        self.config = get_config()
-        self.storage = MemoryStorage()
+    def __init__(
+        self, storage: MemoryStorage | None = None, config: MemoryConfig | None = None
+    ) -> None:
+        """Initialize the retrieval system with optional dependency injection."""
+        self.config = config or get_config()
+        self.storage = storage or MemoryStorage(self.config)
         self.logger = logging.getLogger(__name__)
 
     def _generate_query_embedding(self, query: str) -> list[float]:
@@ -484,7 +486,7 @@ class MemoryRetriever:
             return []
 
         # Limit candidates to avoid API limits
-        candidates = candidates[:20]
+        candidates = candidates[: self.config.rerank_candidate_limit]
 
         # For single candidate, return as-is without reranking
         if len(candidates) == 1:
@@ -536,7 +538,7 @@ class MemoryRetriever:
                 self.config.reranker_llm_base_url,
                 headers=headers,
                 json=payload,
-                timeout=30,
+                timeout=self.config.http_timeout_seconds,
             )
             response.raise_for_status()
 
@@ -814,7 +816,7 @@ class MemoryRetriever:
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Perform hybrid search for both experiences and facts."""
         # Use larger candidate pool for hybrid search
-        top_k = top_n * 4  # Get more candidates for better reranking
+        top_k = top_n * self.config.hybrid_topk_multiplier  # configurable multiplier
 
         # Parallel hybrid retrieval for experiences
         vector_experiences = self._vector_search_experiences(query_embedding, top_k)
@@ -855,6 +857,10 @@ class MemoryRetriever:
         try:
             if top_n is None:
                 top_n = self.config.default_top_n
+            if top_n <= 0:
+                return RetrievalResult(
+                    experiences=[], facts=[], query=query, total_results=0
+                )
 
             # Prepare query components
             query_embedding = self._generate_query_embedding(query)

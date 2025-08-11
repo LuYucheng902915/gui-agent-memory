@@ -622,6 +622,7 @@ class TestStorageCoverage:
         config.chroma_db_path = "./test_data/test_chroma"
         config.experiential_collection_name = "test_exp"
         config.declarative_collection_name = "test_decl"
+        config.chroma_anonymized_telemetry = False
 
         with patch("chromadb.PersistentClient") as mock_client_class:
             mock_client = Mock()
@@ -653,6 +654,7 @@ class TestStorageCoverage:
         config.chroma_db_path = "./test_data/test_chroma"
         config.experiential_collection_name = "test_exp"
         config.declarative_collection_name = "test_decl"
+        config.chroma_anonymized_telemetry = False
 
         with patch("chromadb.PersistentClient") as mock_client_class:
             mock_client = Mock()
@@ -695,6 +697,7 @@ class TestStorageCoverage:
         config.chroma_db_path = "./test_data/test_chroma"
         config.experiential_collection_name = "test_exp"
         config.declarative_collection_name = "test_decl"
+        config.chroma_anonymized_telemetry = False
 
         with patch("chromadb.PersistentClient") as mock_client_class:
             mock_client = Mock()
@@ -725,6 +728,7 @@ class TestStorageCoverage:
         config.chroma_db_path = "./test_data/test_chroma"
         config.experiential_collection_name = "test_exp"
         config.declarative_collection_name = "test_decl"
+        config.chroma_anonymized_telemetry = False
 
         with patch("chromadb.PersistentClient") as mock_client_class:
             mock_client = Mock()
@@ -753,6 +757,7 @@ class TestStorageCoverage:
         config.chroma_db_path = "./test_data/test_chroma"
         config.experiential_collection_name = "test_exp"
         config.declarative_collection_name = "test_decl"
+        config.chroma_anonymized_telemetry = False
 
         with patch("chromadb.PersistentClient") as mock_client_class:
             mock_client = Mock()

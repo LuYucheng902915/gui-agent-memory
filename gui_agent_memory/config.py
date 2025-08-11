@@ -87,6 +87,16 @@ class MemoryConfig(BaseSettings):
     )
     log_enabled: bool = Field(default=True, alias="LOG_ENABLED")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    # Optional: external prompt templates directory; if empty, use packaged prompts
+    prompt_templates_dir: str = Field(default="", alias="PROMPT_TEMPLATES_DIR")
+
+    # Advanced/infra Configuration
+    chroma_anonymized_telemetry: bool = Field(
+        default=False, alias="CHROMA_ANONYMIZED_TELEMETRY"
+    )
+    rerank_candidate_limit: int = Field(default=20, alias="RERANK_CANDIDATE_LIMIT")
+    hybrid_topk_multiplier: int = Field(default=4, alias="HYBRID_TOPK_MULTIPLIER")
+    http_timeout_seconds: int = Field(default=10, alias="HTTP_TIMEOUT_SECONDS")
 
     # pydantic-settings configuration
     # Load variables from environment and automatically from a project-root .env file.
@@ -226,7 +236,7 @@ class MemoryConfig(BaseSettings):
                             "Authorization": f"Bearer {self.reranker_llm_api_key}",
                             "Content-Type": "application/json",
                         },
-                        timeout=10,
+                        timeout=self.http_timeout_seconds,
                     )
                     # If we get any response (even an error about the model),
                     # it means the API endpoint is reachable

@@ -56,6 +56,11 @@ def mock_config():
     config.operation_log_dir = "./test_data/test_logs/operations"
     config.log_enabled = True
     config.log_level = "INFO"
+    config.prompt_templates_dir = ""
+    config.rerank_candidate_limit = 20
+    config.hybrid_topk_multiplier = 4
+    config.http_timeout_seconds = 30
+    config.chroma_anonymized_telemetry = False
 
     # Mock clients - set up as both direct attributes and return values for compatibility
     config.gitee_ai_client = Mock()
