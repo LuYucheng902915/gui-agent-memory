@@ -36,7 +36,7 @@ source .venv/bin/activate  # Linux/Mac
 # 或 .venv\Scripts\activate  # Windows
 
 # 安装项目依赖
-uv sync
+uv sync --all-extras
 ```
 
 ## 🧪 测试

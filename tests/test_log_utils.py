@@ -2,7 +2,6 @@
 Unit tests for the log utilities module.
 """
 
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 from gui_agent_memory.log_utils import safe_slug, write_json_file, write_text_file
@@ -101,16 +100,13 @@ class TestLogUtilsCoverage:
         assert result == "unknown"
 
     def test_write_text_file_exception_handling(self, tmp_path):
-        """Test write_text_file exception handling (lines 43-44)."""
-        # Create a file path in a directory that will cause permission error
-        read_only_dir = tmp_path / "readonly"
-        read_only_dir.mkdir()
-        read_only_dir.chmod(0o444)  # Read-only directory
-
-        test_file = read_only_dir / "test.txt"
-
-        # Mock the logger to capture the exception log
-        with patch("gui_agent_memory.log_utils.logging.getLogger") as mock_get_logger:
+        """Test write_text_file exception handling (cross-platform)."""
+        test_file = tmp_path / "readonly" / "test.txt"
+        # Mock the logger to capture the exception log and force write failure
+        with (
+            patch("gui_agent_memory.log_utils.logging.getLogger") as mock_get_logger,
+            patch("pathlib.Path.write_text", side_effect=PermissionError("denied")),
+        ):
             mock_logger = Mock()
             mock_get_logger.return_value = mock_logger
 
@@ -123,12 +119,14 @@ class TestLogUtilsCoverage:
             assert "Failed to write text file" in args[0]
             assert str(test_file) in args[1]
 
-    def test_write_text_file_mkdir_exception(self):
-        """Test write_text_file when mkdir fails."""
-        # Use a path that will cause mkdir to fail
-        bad_path = Path("/root/nonexistent/test.txt")  # Requires root permissions
+    def test_write_text_file_mkdir_exception(self, tmp_path):
+        """Test write_text_file when mkdir fails (cross-platform)."""
+        bad_path = tmp_path / "noaccess" / "test.txt"
 
-        with patch("gui_agent_memory.log_utils.logging.getLogger") as mock_get_logger:
+        with (
+            patch("gui_agent_memory.log_utils.logging.getLogger") as mock_get_logger,
+            patch("pathlib.Path.mkdir", side_effect=PermissionError("denied")),
+        ):
             mock_logger = Mock()
             mock_get_logger.return_value = mock_logger
 
@@ -139,16 +137,13 @@ class TestLogUtilsCoverage:
             mock_logger.exception.assert_called_once()
 
     def test_write_json_file_exception_handling(self, tmp_path):
-        """Test write_json_file exception handling (lines 78-79)."""
-        # Create a file path in a directory that will cause permission error
-        read_only_dir = tmp_path / "readonly"
-        read_only_dir.mkdir()
-        read_only_dir.chmod(0o444)  # Read-only directory
-
-        test_file = read_only_dir / "test.json"
-
-        # Mock the logger to capture the exception log
-        with patch("gui_agent_memory.log_utils.logging.getLogger") as mock_get_logger:
+        """Test write_json_file exception handling (cross-platform)."""
+        test_file = tmp_path / "readonly" / "test.json"
+        # Mock the logger to capture the exception log and force write failure
+        with (
+            patch("gui_agent_memory.log_utils.logging.getLogger") as mock_get_logger,
+            patch("pathlib.Path.write_text", side_effect=PermissionError("denied")),
+        ):
             mock_logger = Mock()
             mock_get_logger.return_value = mock_logger
 
@@ -182,12 +177,14 @@ class TestLogUtilsCoverage:
             # Verify that exception was logged
             mock_logger.exception.assert_called_once()
 
-    def test_write_json_file_mkdir_exception(self):
-        """Test write_json_file when mkdir fails."""
-        # Use a path that will cause mkdir to fail
-        bad_path = Path("/root/nonexistent/test.json")  # Requires root permissions
+    def test_write_json_file_mkdir_exception(self, tmp_path):
+        """Test write_json_file when mkdir fails (cross-platform)."""
+        bad_path = tmp_path / "noaccess" / "test.json"
 
-        with patch("gui_agent_memory.log_utils.logging.getLogger") as mock_get_logger:
+        with (
+            patch("gui_agent_memory.log_utils.logging.getLogger") as mock_get_logger,
+            patch("pathlib.Path.mkdir", side_effect=PermissionError("denied")),
+        ):
             mock_logger = Mock()
             mock_get_logger.return_value = mock_logger
 

@@ -954,24 +954,20 @@ class TestIngestionCoverage:
         assert result == "unknown"
 
     def test_write_text_file_exception(self, ingestion, tmp_path):
-        """Test _write_text_file exception handling (lines 103-105)."""
-        # Create a path that will cause permission error
-        read_only_dir = tmp_path / "readonly"
-        read_only_dir.mkdir()
-        read_only_dir.chmod(0o444)  # Read-only directory
+        """Test _write_text_file exception handling (cross-platform)."""
+        test_file = tmp_path / "readonly" / "test.txt"
 
-        test_file = read_only_dir / "test.txt"
+        # Force write failure by patching Path.write_text
+        with patch("pathlib.Path.write_text", side_effect=PermissionError("denied")):
+            with patch.object(ingestion, "logger") as mock_logger:
+                # This should not raise an exception, just log it
+                ingestion._write_text_file(test_file, "test content")
 
-        # Mock the logger to capture the exception log
-        with patch.object(ingestion, "logger") as mock_logger:
-            # This should not raise an exception, just log it
-            ingestion._write_text_file(test_file, "test content")
-
-            # Verify that exception was logged
-            mock_logger.exception.assert_called_once()
-            assert "Failed to write log file" in str(
-                mock_logger.exception.call_args[0][0]
-            )
+                # Verify that exception was logged
+                mock_logger.exception.assert_called_once()
+                assert "Failed to write log file" in str(
+                    mock_logger.exception.call_args[0][0]
+                )
 
     def test_add_experience_existing_record_skip(self, ingestion, mock_config):
         """Test add_experience when record already exists (lines 466-474)."""
