@@ -19,10 +19,18 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.17.1  # Align with pyproject.toml minimum version
+    rev: v1.17.1  # Align with uv.lock/pyproject
     hooks:
       - id: mypy
         additional_dependencies: [
-          types-requests>=2.32.4.20250611,  # Align with actual installed version
+          types-requests>=2.32.4.20250611,
         ]
-        args: [--no-warn-unused-ignores]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (run tests before push)
+        entry: pytest -q
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
