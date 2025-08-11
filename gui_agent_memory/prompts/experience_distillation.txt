@@ -1,53 +1,67 @@
-You are an expert at analyzing GUI automation task execution history and distilling it into structured operational experiences.
+您是一名擅长从 GUI 自动化“执行历史”中提炼结构化经验的专家。
 
-Your task is to analyze the provided raw task execution history and extract a high-quality structured experience record.
+目标：基于给定的执行历史，生成“可被检索与复用”的中文结构化经验。
 
-## Input Information:
-- Task Description: {task_description}
-- Application Name: {app_name}
-- Task Success Status: {is_successful}
-- Raw Execution History: {raw_history}
+重要语言约束（必须遵守）：
+- 所有输出的文本字段必须为中文，包括 task_description、keywords、preconditions、thought、target_element_description。
+- 常见的技术专有名词与产品名请保留英文原文，不要翻译（示例：Python、Docker、Git、VS Code、React、Node.js、npm、Chrome、Gmail、API、HTTP、URL、JSON、SQL）。
+- action 字段请使用系统的标准英文动作类型之一，确保与系统兼容：
+  - 允许值示例：click、type、key_press、scroll、wait、select、navigate、drag、drop、open、close、custom。
 
-## Your Responsibilities:
+## 输入信息
+- 任务描述：{task_description}
+- 应用程序名称：{app_name}
+- 任务成功状态：{is_successful}
+- 原始执行历史（预处理后的步骤列表或原始 JSONL 展开内容）：{raw_history}
 
-1. **Extract Action Flow**: Convert the raw history into a clear sequence of ActionStep objects, each containing:
-   - thought: The reasoning behind the action
-   - action: The type of action (click, type, scroll, wait, etc.)
-   - target_element_description: Clear description of the target UI element
+## 您的职责
+1) 提取“操作流程”（action_flow）
+   - 将执行历史转为有序步骤列表，每步包含：
+     - thought：用中文说明此步意图/原因
+     - action：从允许值中选择一个英文动作类型（如 click/type）
+     - target_element_description：用中文清晰描述目标 UI 元素/位置
+   - 若输入含有失败步骤或重试，请据实保留，便于后续学习改进。
 
-2. **Generate Keywords**: Create 5-10 relevant keywords focusing on:
-   - Application name and key features
-   - Action types and UI elements
-   - Domain-specific terms
-   - Task category descriptors
+2) 生成“关键词”（keywords，5-10 个）
+   - 聚焦应用名、核心功能、重要 UI/操作、领域术语与意图；
+   - 关键词文本统一为中文；保留英文专有名词原文不翻译（如 Python、Docker、Git、VS Code、API 等）；
+   - 去重、避免过泛的词（如“应用”“窗口”等），优先能助于检索与匹配的词。
 
-3. **Define Preconditions**: Identify the required conditions or context for this experience to be applicable
+3) 定义“前置条件”（preconditions）
+   - 用中文简明列出此经验适用的环境/状态要求（例如：已登录、已打开某应用/页面、网络可用等）。
 
-4. **Craft Task Description**: Create a clear, concise description of what this task accomplishes
+4) 编写“任务描述”（task_description）
+   - 用中文清晰概述该经验完成的任务目标；
+   - 避免冗长叙述，关注可复用要点。
 
-## Output Format:
-Return a JSON object with the following structure:
+## 输出格式（只返回 JSON，不要附加其他文字或解释）
+注意：为避免模板格式化错误，以下示例中的花括号使用双花括号 {{ }}。
+
 ```json
 {{
-    "task_description": "Clear description of the task",
-    "keywords": ["keyword1", "keyword2", ...],
-    "action_flow": [
-        {{
-            "thought": "Reasoning for this step",
-            "action": "action_type",
-            "target_element_description": "Description of target element"
-        }}
-    ],
-    "preconditions": "Required conditions for this experience to apply"
+  "task_description": "任务的清晰中文描述，必要时保留英文专有名词",
+  "keywords": ["中文关键词1", "中文关键词2", "Python", "Docker", ...],
+  "action_flow": [
+    {{
+      "thought": "用中文说明该步骤的意图或原因",
+      "action": "click",
+      "target_element_description": "用中文描述目标元素，例如“登录按钮”"
+    }},
+    {{
+      "thought": "...",
+      "action": "type",
+      "target_element_description": "用中文描述输入位置，例如“搜索框”"
+    }}
+  ],
+  "preconditions": "用中文列出此经验适用的前置条件"
 }}
 ```
 
-## Guidelines:
-- Be concise but descriptive
-- Focus on reusable patterns
-- Include context that makes the experience generalizable
-- For failed tasks, capture what went wrong and why
-- Ensure action flow is logically ordered
-- Use consistent terminology
+## 质量要求与规范
+- 语言：除约定的英文专有名词外，其余一律中文；避免中英混杂与直译腔；
+- 准确：操作步骤要与历史一致，顺序清晰，语义明确；
+- 精炼：task_description 与 preconditions 简洁可复用，不赘述；
+- 一致：术语统一（如“搜索框”“登录按钮”“菜单栏”），避免同物多名；
+- 可靠：即便历史中有噪声/失败，也要产出最佳可用的结构化结果（勿返回空）。
 
-Analyze the provided execution history and generate the structured experience record:
+请基于上述要求输出结构化经验，仅返回 JSON 对象。

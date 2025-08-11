@@ -67,6 +67,23 @@ class MemoryConfig:
             "FAILED_LEARNING_LOG_PATH",
             "./memory_system/logs/failed_learning_tasks.jsonl",
         )
+        # Prompt logging (inputs and LLM outputs)
+        self.prompt_log_dir = os.getenv(
+            "PROMPT_LOG_DIR",
+            "./memory_system/logs/prompts",
+        )
+        # Operation logging - per API call logs
+        self.operation_log_dir = os.getenv(
+            "OPERATION_LOG_DIR",
+            "./memory_system/logs/operations",
+        )
+        self.log_enabled = os.getenv("LOG_ENABLED", "true").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self.log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
         # Initialize clients
         self._init_clients()

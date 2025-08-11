@@ -52,6 +52,10 @@ def mock_config():
     config.default_top_n = 3
     config.embedding_dimension = 10
     config.failed_learning_log_path = "./test_data/test_logs/failed_learning.jsonl"
+    config.prompt_log_dir = "./test_data/test_logs/prompts"
+    config.operation_log_dir = "./test_data/test_logs/operations"
+    config.log_enabled = True
+    config.log_level = "INFO"
 
     # Mock clients - set up as both direct attributes and return values for compatibility
     config.gitee_ai_client = Mock()

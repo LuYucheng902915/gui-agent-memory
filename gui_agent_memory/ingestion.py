@@ -11,6 +11,7 @@ This module handles:
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -37,10 +38,14 @@ class MemoryIngestion:
     and their storage with appropriate embeddings.
     """
 
-    def __init__(self) -> None:
-        """Initialize the ingestion system."""
+    def __init__(self, storage: MemoryStorage | None = None) -> None:
+        """Initialize the ingestion system.
+
+        Args:
+            storage: Optional injected storage (used in tests)
+        """
         self.config = get_config()
-        self.storage = MemoryStorage()
+        self.storage = storage or MemoryStorage()
 
         # Setup logging
         self._setup_logging()
@@ -83,6 +88,25 @@ class MemoryIngestion:
 
         except Exception as e:
             raise IngestionError(f"Failed to load prompt templates: {e}") from e
+
+    # ----------------------------
+    # Internal logging helpers
+    # ----------------------------
+    def _safe_slug(self, text: str) -> str:
+        """Make a filesystem-safe slug from arbitrary text."""
+        if not text:
+            return "unknown"
+        slug = re.sub(r"[^\w\-\.]+", "-", str(text), flags=re.UNICODE)
+        return slug.strip("-_") or "unknown"
+
+    def _write_text_file(self, path: Path, content: str) -> None:
+        """Write text to a file with UTF-8 encoding, logging exceptions instead of passing silently."""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        except Exception as exc:
+            # Log and continue; do not break primary flow
+            self.logger.exception(f"Failed to write log file '{path}': {exc}")
 
     def _generate_embedding(self, text: str) -> list[float]:
         """
@@ -186,6 +210,14 @@ class MemoryIngestion:
 
             prompt = self.keyword_extraction_prompt.format(query=query)
 
+            # --- prompt logging: keyword extraction ---
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            base_prompt_dir = Path(
+                getattr(self.config, "prompt_log_dir", "./memory_system/logs/prompts")
+            )
+            keyword_dir = base_prompt_dir / f"keyword_{ts}"
+            self._write_text_file(keyword_dir / "input_prompt.txt", prompt)
+
             response = client.chat.completions.create(
                 model=self.config.experience_llm_model,
                 messages=[
@@ -205,6 +237,9 @@ class MemoryIngestion:
             result = result.strip()
             keywords = json.loads(result)
 
+            # --- output logging: keyword extraction ---
+            self._write_text_file(keyword_dir / "model_output.json", result)
+
             return keywords if isinstance(keywords, list) else []
 
         except Exception as e:
@@ -213,7 +248,7 @@ class MemoryIngestion:
             return self._extract_keywords_with_jieba(query)
 
     def _distill_experience_with_llm(
-        self, learning_request: LearningRequest
+        self, learning_request: LearningRequest, log_dir: Path | None = None
     ) -> dict[str, Any]:
         """
         Use LLM to distill raw history into structured experience.
@@ -241,6 +276,18 @@ class MemoryIngestion:
                 raw_history=json.dumps(learning_request.raw_history, indent=2),
             )
 
+            # --- prompt logging: experience distillation ---
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            if log_dir is None:
+                folder = f"experience_{ts}_{self._safe_slug(learning_request.source_task_id)}"
+                base_prompt_dir = Path(
+                    getattr(
+                        self.config, "prompt_log_dir", "./memory_system/logs/prompts"
+                    )
+                )
+                log_dir = base_prompt_dir / folder
+            self._write_text_file(log_dir / "input_prompt.txt", prompt)
+
             response = client.chat.completions.create(
                 model=self.config.experience_llm_model,
                 messages=[
@@ -266,6 +313,9 @@ class MemoryIngestion:
                 json_str = result[json_start:json_end].strip()
             else:
                 json_str = result
+
+            # --- output logging: experience distillation ---
+            self._write_text_file(log_dir / "model_output.json", result)
 
             return json.loads(json_str)
 
@@ -310,8 +360,37 @@ class MemoryIngestion:
                 task_description=task_description,
             )
 
-            # Distill experience using LLM
-            distilled_data = self._distill_experience_with_llm(learning_request)
+            # Prepare per-experience log directory
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            base_prompt_dir = Path(
+                getattr(self.config, "prompt_log_dir", "./memory_system/logs/prompts")
+            )
+            experience_dir = (
+                base_prompt_dir / f"experience_{ts}_{self._safe_slug(source_task_id)}"
+            )
+            # Persist raw inputs for traceability
+            self._write_text_file(
+                experience_dir / "raw_history.json",
+                json.dumps(raw_history, ensure_ascii=False, indent=2),
+            )
+            self._write_text_file(
+                experience_dir / "request_meta.json",
+                json.dumps(
+                    {
+                        "source_task_id": source_task_id,
+                        "is_successful": is_successful,
+                        "app_name": app_name,
+                        "task_description": task_description,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            )
+
+            # Distill experience using LLM (logs into same folder)
+            distilled_data = self._distill_experience_with_llm(
+                learning_request, log_dir=experience_dir
+            )
 
             # Create action steps
             action_steps = []

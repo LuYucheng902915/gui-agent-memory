@@ -9,6 +9,7 @@ from typing import Any
 
 from .config import ConfigurationError, get_config
 from .ingestion import IngestionError, MemoryIngestion
+from .log_utils import new_operation_dir, safe_slug, write_json_file, write_text_file
 from .models import ExperienceRecord, FactRecord, RetrievalResult
 from .retriever import MemoryRetriever, RetrievalError
 from .storage import MemoryStorage, StorageError
@@ -85,7 +86,16 @@ class MemorySystem:
             top_n = self.config.default_top_n
 
         try:
-            return self.retriever.retrieve_memories(query, top_n)
+            # operation-scoped logging (optional)
+            op_dir = new_operation_dir(
+                self.config.operation_log_dir, "retrieve", query[:48]
+            )
+            write_text_file(op_dir / "input_query.txt", query)
+            write_text_file(op_dir / "params.txt", f"top_n={top_n}")
+
+            result = self.retriever.retrieve_memories(query, top_n)
+            write_json_file(op_dir / "result.json", result)
+            return result
         except RetrievalError as e:
             raise MemorySystemError(f"Memory retrieval failed: {e}") from e
 
@@ -137,13 +147,32 @@ class MemorySystem:
             raise MemorySystemError("Source task ID cannot be empty")
 
         try:
-            return self.ingestion.learn_from_task(
+            # operation-scoped logging (optional)
+            op_dir = new_operation_dir(
+                self.config.operation_log_dir,
+                "learn_from_task",
+                safe_slug(source_task_id),
+            )
+            write_json_file(op_dir / "raw_history.json", raw_history)
+            write_json_file(
+                op_dir / "params.json",
+                {
+                    "is_successful": is_successful,
+                    "source_task_id": source_task_id,
+                    "app_name": app_name,
+                    "task_description": task_description,
+                },
+            )
+
+            result = self.ingestion.learn_from_task(
                 raw_history=raw_history,
                 is_successful=is_successful,
                 source_task_id=source_task_id,
                 app_name=app_name,
                 task_description=task_description,
             )
+            write_text_file(op_dir / "result.txt", result)
+            return result
         except IngestionError as e:
             raise MemorySystemError(f"Learning from task failed: {e}") from e
 
@@ -185,7 +214,15 @@ class MemorySystem:
             raise MemorySystemError("Experience must be an ExperienceRecord instance")
 
         try:
-            return self.ingestion.add_experience(experience)
+            op_dir = new_operation_dir(
+                self.config.operation_log_dir,
+                "add_experience",
+                safe_slug(experience.source_task_id),
+            )
+            write_json_file(op_dir / "experience.json", experience)
+            result = self.ingestion.add_experience(experience)
+            write_text_file(op_dir / "result.txt", result)
+            return result
         except IngestionError as e:
             raise MemorySystemError(f"Adding experience failed: {e}") from e
 
@@ -222,7 +259,14 @@ class MemorySystem:
             keywords = []
 
         try:
-            return self.ingestion.add_fact(content, keywords, source)
+            op_dir = new_operation_dir(self.config.operation_log_dir, "add_fact")
+            write_json_file(
+                op_dir / "fact_input.json",
+                {"content": content, "keywords": keywords, "source": source},
+            )
+            result = self.ingestion.add_fact(content, keywords, source)
+            write_text_file(op_dir / "result.txt", result)
+            return result
         except IngestionError as e:
             raise MemorySystemError(f"Adding fact failed: {e}") from e
 
@@ -267,7 +311,11 @@ class MemorySystem:
                 )
 
         try:
-            return self.ingestion.batch_add_facts(facts_data)
+            op_dir = new_operation_dir(self.config.operation_log_dir, "batch_add_facts")
+            write_json_file(op_dir / "facts_input.json", facts_data)
+            result = self.ingestion.batch_add_facts(facts_data)
+            write_json_file(op_dir / "result.json", result)
+            return result
         except IngestionError as e:
             raise MemorySystemError(f"Batch adding facts failed: {e}") from e
 
@@ -293,7 +341,14 @@ class MemorySystem:
         try:
             if top_n is None:
                 top_n = self.config.default_top_n
-            return self.retriever.get_similar_experiences(task_description, top_n)
+            op_dir = new_operation_dir(
+                self.config.operation_log_dir, "get_similar_experiences"
+            )
+            write_text_file(op_dir / "task_description.txt", task_description)
+            write_text_file(op_dir / "params.txt", f"top_n={top_n}")
+            result = self.retriever.get_similar_experiences(task_description, top_n)
+            write_json_file(op_dir / "result.json", result)
+            return result
         except RetrievalError as e:
             raise MemorySystemError(f"Getting similar experiences failed: {e}") from e
 
@@ -319,7 +374,14 @@ class MemorySystem:
         try:
             if top_n is None:
                 top_n = self.config.default_top_n
-            return self.retriever.get_related_facts(topic, top_n)
+            op_dir = new_operation_dir(
+                self.config.operation_log_dir, "get_related_facts"
+            )
+            write_text_file(op_dir / "topic.txt", topic)
+            write_text_file(op_dir / "params.txt", f"top_n={top_n}")
+            result = self.retriever.get_related_facts(topic, top_n)
+            write_json_file(op_dir / "result.json", result)
+            return result
         except RetrievalError as e:
             raise MemorySystemError(f"Getting related facts failed: {e}") from e
 

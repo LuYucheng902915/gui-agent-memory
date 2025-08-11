@@ -3,9 +3,10 @@ Unit tests for the configuration module.
 """
 
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
+import requests
 
 from gui_agent_memory.config import (
     ConfigurationError,
@@ -18,8 +19,20 @@ from gui_agent_memory.config import (
 class TestMemoryConfig:
     """Test cases for MemoryConfig class."""
 
-    def test_config_initialization_success(self, mock_openai_client):
+    def test_config_initialization_success(self, mock_openai_client, monkeypatch):
         """Test successful configuration initialization."""
+        # Set up the test environment variables
+        monkeypatch.setenv(
+            "EMBEDDING_LLM_BASE_URL", "https://test-embedding.example.com/v1"
+        )
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-fake-embedding-key-12345")
+        monkeypatch.setenv(
+            "RERANKER_LLM_BASE_URL", "https://test-reranker.example.com/v1/rerank"
+        )
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-fake-reranker-key-67890")
+        monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test-llm.example.com/v1")
+        monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-fake-llm-key-abcdef")
+
         with patch("gui_agent_memory.config.OpenAI", return_value=mock_openai_client):
             config = MemoryConfig()
 
@@ -224,3 +237,229 @@ class TestConfigModule:
 
         with pytest.raises(ConfigurationError):
             get_config()
+
+
+class TestConfigCoverage:
+    """Tests for uncovered code paths in config.py"""
+
+    def test_validate_configuration_reranker_fallback_success(self, monkeypatch):
+        """Test reranker validation fallback to HTTP request (lines 167-194)."""
+        # Set up environment variables
+        monkeypatch.setenv("EMBEDDING_LLM_BASE_URL", "https://test-embedding.com/v1")
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("RERANKER_LLM_BASE_URL", "https://test-reranker.com/v1")
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test-llm.com/v1")
+        monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-key")
+
+        with patch("gui_agent_memory.config.OpenAI") as mock_openai:
+            # Mock embedding and experience LLM clients to succeed
+            mock_embedding_client = Mock()
+            mock_embedding_client.models.list.return_value = Mock()
+
+            mock_experience_client = Mock()
+            mock_experience_client.models.list.return_value = Mock()
+
+            # Mock reranker client to fail on models.list() but succeed on HTTP request
+            mock_reranker_client = Mock()
+            mock_reranker_client.models.list.side_effect = Exception(
+                "models.list failed"
+            )
+
+            mock_openai.side_effect = [
+                mock_embedding_client,
+                mock_reranker_client,
+                mock_experience_client,
+            ]
+
+            # Mock successful HTTP response
+            mock_response = Mock()
+            mock_response.status_code = 200
+
+            with patch("requests.post", return_value=mock_response) as mock_post:
+                config = MemoryConfig()
+                result = config.validate_configuration()
+
+                assert result is True
+
+                # Verify the HTTP request was made with correct parameters
+                mock_post.assert_called_once_with(
+                    "https://test-reranker.com/v1",
+                    json={
+                        "query": "test",
+                        "documents": ["test document"],
+                        "model": "Qwen3-Reranker-8B",
+                    },
+                    headers={
+                        "X-Failover-Enabled": "true",
+                        "Authorization": "Bearer test-key",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=10,
+                )
+
+    def test_validate_configuration_reranker_fallback_422_status(self, monkeypatch):
+        """Test reranker validation with 422 status code (valid API)."""
+        # Set up environment variables
+        monkeypatch.setenv("EMBEDDING_LLM_BASE_URL", "https://test-embedding.com/v1")
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("RERANKER_LLM_BASE_URL", "https://test-reranker.com/v1")
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test-llm.com/v1")
+        monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-key")
+
+        with patch("gui_agent_memory.config.OpenAI") as mock_openai:
+            # Mock embedding and experience LLM clients to succeed
+            mock_embedding_client = Mock()
+            mock_embedding_client.models.list.return_value = Mock()
+
+            mock_experience_client = Mock()
+            mock_experience_client.models.list.return_value = Mock()
+
+            # Mock reranker client to fail on models.list()
+            mock_reranker_client = Mock()
+            mock_reranker_client.models.list.side_effect = Exception(
+                "models.list failed"
+            )
+
+            mock_openai.side_effect = [
+                mock_embedding_client,
+                mock_reranker_client,
+                mock_experience_client,
+            ]
+
+            # Mock HTTP response with 422 status (still valid)
+            mock_response = Mock()
+            mock_response.status_code = 422
+
+            with patch("requests.post", return_value=mock_response):
+                config = MemoryConfig()
+                result = config.validate_configuration()
+
+                assert result is True
+
+    def test_validate_configuration_reranker_fallback_400_status(self, monkeypatch):
+        """Test reranker validation with 400 status code (valid API)."""
+        # Set up environment variables
+        monkeypatch.setenv("EMBEDDING_LLM_BASE_URL", "https://test-embedding.com/v1")
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("RERANKER_LLM_BASE_URL", "https://test-reranker.com/v1")
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test-llm.com/v1")
+        monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-key")
+
+        with patch("gui_agent_memory.config.OpenAI") as mock_openai:
+            # Mock embedding and experience LLM clients to succeed
+            mock_embedding_client = Mock()
+            mock_embedding_client.models.list.return_value = Mock()
+
+            mock_experience_client = Mock()
+            mock_experience_client.models.list.return_value = Mock()
+
+            # Mock reranker client to fail on models.list()
+            mock_reranker_client = Mock()
+            mock_reranker_client.models.list.side_effect = Exception(
+                "models.list failed"
+            )
+
+            mock_openai.side_effect = [
+                mock_embedding_client,
+                mock_reranker_client,
+                mock_experience_client,
+            ]
+
+            # Mock HTTP response with 400 status (still valid)
+            mock_response = Mock()
+            mock_response.status_code = 400
+
+            with patch("requests.post", return_value=mock_response):
+                config = MemoryConfig()
+                result = config.validate_configuration()
+
+                assert result is True
+
+    def test_validate_configuration_reranker_fallback_http_error(self, monkeypatch):
+        """Test reranker validation when HTTP request fails."""
+        # Set up environment variables
+        monkeypatch.setenv("EMBEDDING_LLM_BASE_URL", "https://test-embedding.com/v1")
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("RERANKER_LLM_BASE_URL", "https://test-reranker.com/v1")
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test-llm.com/v1")
+        monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-key")
+
+        with patch("gui_agent_memory.config.OpenAI") as mock_openai:
+            # Mock embedding client to succeed
+            mock_embedding_client = Mock()
+            mock_embedding_client.models.list.return_value = Mock()
+
+            # Mock reranker client to fail on models.list()
+            mock_reranker_client = Mock()
+            mock_reranker_client.models.list.side_effect = Exception(
+                "models.list failed"
+            )
+
+            # Mock experience client (won't be reached due to error)
+            mock_experience_client = Mock()
+
+            mock_openai.side_effect = [
+                mock_embedding_client,
+                mock_reranker_client,
+                mock_experience_client,
+            ]
+
+            # Mock HTTP request to raise an exception
+            with patch(
+                "requests.post", side_effect=requests.RequestException("HTTP error")
+            ):
+                config = MemoryConfig()
+
+                with pytest.raises(ConfigurationError) as exc_info:
+                    config.validate_configuration()
+
+                assert "Reranker API validation failed" in str(exc_info.value)
+
+    def test_validate_configuration_reranker_fallback_bad_status(self, monkeypatch):
+        """Test reranker validation with bad HTTP status code."""
+        # Set up environment variables
+        monkeypatch.setenv("EMBEDDING_LLM_BASE_URL", "https://test-embedding.com/v1")
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("RERANKER_LLM_BASE_URL", "https://test-reranker.com/v1")
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-key")
+        monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test-llm.com/v1")
+        monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-key")
+
+        with patch("gui_agent_memory.config.OpenAI") as mock_openai:
+            # Mock embedding client to succeed
+            mock_embedding_client = Mock()
+            mock_embedding_client.models.list.return_value = Mock()
+
+            # Mock reranker client to fail on models.list()
+            mock_reranker_client = Mock()
+            mock_reranker_client.models.list.side_effect = Exception(
+                "models.list failed"
+            )
+
+            # Mock experience client (won't be reached due to error)
+            mock_experience_client = Mock()
+
+            mock_openai.side_effect = [
+                mock_embedding_client,
+                mock_reranker_client,
+                mock_experience_client,
+            ]
+
+            # Mock HTTP response with bad status code
+            mock_response = Mock()
+            mock_response.status_code = 500
+            mock_response.raise_for_status.side_effect = requests.HTTPError(
+                "500 Server Error"
+            )
+
+            with patch("requests.post", return_value=mock_response):
+                config = MemoryConfig()
+
+                with pytest.raises(ConfigurationError) as exc_info:
+                    config.validate_configuration()
+
+                assert "Reranker API validation failed" in str(exc_info.value)

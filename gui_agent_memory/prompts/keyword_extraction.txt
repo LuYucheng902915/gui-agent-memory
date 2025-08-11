@@ -1,33 +1,33 @@
-You are an expert at extracting relevant keywords from task descriptions for hybrid retrieval systems.
+您是一名为混合检索系统提取关键词的专家。
 
-Your task is to analyze the provided query and extract keywords that would be useful for finding related operational experiences and semantic knowledge.
+任务：分析给定查询，从中提取有助于检索相关“操作经验（experiences）”与“语义知识（facts）”的关键词。
 
-## Input:
-Query: {query}
+重要语言约束（必须遵守）：
+- 关键词文本一律输出中文；
+- 常见技术专有名词与产品名保留英文原文，不要翻译（示例：Python、Docker、Git、VS Code、React、Node.js、npm、Chrome、Gmail、API、HTTP、URL、JSON、SQL）。
 
-## Your Responsibilities:
+## 输入
+查询：{query}
 
-1. **Extract Core Keywords**: Identify the most important terms including:
-   - Application names (e.g., "Chrome", "Excel", "Photoshop")
-   - Action types (e.g., "click", "type", "scroll", "drag")
-   - UI elements (e.g., "button", "menu", "dialog", "field")
-   - Task objectives (e.g., "login", "save", "export", "search")
-   - Domain terms (e.g., "email", "document", "image", "spreadsheet")
+## 您的职责
+1) 提取核心关键词（5-10 个）：
+   - 应用/产品名称（如：Chrome、Excel、Photoshop、VS Code 等）
+   - 操作类型（如：点击、输入、滚动、拖拽、选择、打开、关闭、等待 等）
+   - UI 元素（如：按钮、菜单、对话框、输入框、列表、标签页 等）
+   - 任务目标（如：登录、保存、导出、搜索、上传、下载 等）
+   - 领域术语（如：邮箱、文档、图片、表格、容器、镜像、依赖 等）
 
-2. **Normalize Terms**: Convert to lowercase and use standard terminology
+2) 术语规范化：
+   - 统一中文表达；英文专有名词按原文保留；
+   - 避免同义词重复，选用更通用、可检索的词形。
 
-3. **Prioritize Relevance**: Focus on terms that would help match similar tasks
+3) 相关性优先：
+   - 只保留与查询意图高度相关的术语；
+   - 避免过于泛化的词（如“应用”“界面”），除非确有必要。
 
-## Output Format:
-Return a JSON array of keywords:
+## 输出格式（仅返回 JSON 数组，不附加其他文字）
 ```json
-["keyword1", "keyword2", "keyword3", ...]
+["关键词1", "关键词2", "Python", "容器", ...]
 ```
 
-## Guidelines:
-- Limit to 5-10 most relevant keywords
-- Avoid overly generic terms unless they're essential
-- Include variations if helpful (e.g., both "login" and "sign in")
-- Focus on searchable, distinctive terms
-
-Extract keywords from the query:
+请从查询中提取关键词：

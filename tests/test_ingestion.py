@@ -8,7 +8,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from gui_agent_memory.ingestion import MemoryIngestion
+from gui_agent_memory.ingestion import IngestionError, MemoryIngestion
+from gui_agent_memory.models import ActionStep, ExperienceRecord
 
 
 class TestMemoryIngestion:
@@ -927,3 +928,176 @@ class TestMemoryIngestionAdvanced:
             ingestion.batch_add_facts(facts_data)
 
         assert "Failed to add facts to storage" in str(exc_info.value)
+
+
+class TestIngestionCoverage:
+    """Tests for uncovered code paths in ingestion.py"""
+
+    @pytest.fixture
+    def ingestion(self, mock_config, mock_storage):
+        """Create MemoryIngestion instance for testing."""
+        with patch("gui_agent_memory.ingestion.get_config", return_value=mock_config):
+            return MemoryIngestion(mock_storage)
+
+    def test_safe_slug_empty_text(self, ingestion):
+        """Test _safe_slug with empty text (line 94)."""
+        # Test empty string
+        result = ingestion._safe_slug("")
+        assert result == "unknown"
+
+        # Test None
+        result = ingestion._safe_slug(None)
+        assert result == "unknown"
+
+        # Test whitespace only
+        result = ingestion._safe_slug("   ")
+        assert result == "unknown"
+
+    def test_write_text_file_exception(self, ingestion, tmp_path):
+        """Test _write_text_file exception handling (lines 103-105)."""
+        # Create a path that will cause permission error
+        read_only_dir = tmp_path / "readonly"
+        read_only_dir.mkdir()
+        read_only_dir.chmod(0o444)  # Read-only directory
+
+        test_file = read_only_dir / "test.txt"
+
+        # Mock the logger to capture the exception log
+        with patch.object(ingestion, "logger") as mock_logger:
+            # This should not raise an exception, just log it
+            ingestion._write_text_file(test_file, "test content")
+
+            # Verify that exception was logged
+            mock_logger.exception.assert_called_once()
+            assert "Failed to write log file" in str(
+                mock_logger.exception.call_args[0][0]
+            )
+
+    def test_add_experience_existing_record_skip(self, ingestion, mock_config):
+        """Test add_experience when record already exists (lines 466-474)."""
+        # Create sample experience
+        experience = ExperienceRecord(
+            task_description="Test task",
+            keywords=["test"],
+            action_flow=[
+                ActionStep(
+                    thought="test thought",
+                    action="test action",
+                    target_element_description="test target",
+                )
+            ],
+            preconditions="test preconditions",
+            is_successful=True,
+            source_task_id="existing_task_123",
+        )
+
+        # Mock storage to return True for experience_exists
+        ingestion.storage.experience_exists.return_value = True
+
+        result = ingestion.add_experience(experience)
+
+        assert "already exists, skipping" in result
+        assert "existing_task_123" in result
+
+        # Verify that experience_exists was called but add_experiences was not
+        ingestion.storage.experience_exists.assert_called_once_with("existing_task_123")
+        ingestion.storage.add_experiences.assert_not_called()
+
+    def test_add_experience_success_path(self, ingestion, mock_config):
+        """Test successful add_experience path."""
+        # Create sample experience
+        experience = ExperienceRecord(
+            task_description="Test task",
+            keywords=["test"],
+            action_flow=[
+                ActionStep(
+                    thought="test thought",
+                    action="test action",
+                    target_element_description="test target",
+                )
+            ],
+            preconditions="test preconditions",
+            is_successful=True,
+            source_task_id="new_task_456",
+        )
+
+        # Mock storage to return False for experience_exists (new record)
+        ingestion.storage.experience_exists.return_value = False
+        ingestion.storage.add_experiences.return_value = ["record_id_123"]
+
+        # Mock embedding generation
+        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
+            Mock(data=[Mock(embedding=[0.1, 0.2, 0.3])])
+        )
+
+        result = ingestion.add_experience(experience)
+
+        assert "Successfully added experience" in result
+        assert "new_task_456" in result
+        assert "record_id_123" in result
+
+        # Verify the full flow was executed
+        ingestion.storage.experience_exists.assert_called_once_with("new_task_456")
+        ingestion.storage.add_experiences.assert_called_once()
+
+    def test_add_experience_embedding_error(self, ingestion, mock_config):
+        """Test add_experience when embedding generation fails."""
+        experience = ExperienceRecord(
+            task_description="Test task",
+            keywords=["test"],
+            action_flow=[
+                ActionStep(
+                    thought="test thought",
+                    action="test action",
+                    target_element_description="test target",
+                )
+            ],
+            preconditions="test preconditions",
+            is_successful=True,
+            source_task_id="error_task_789",
+        )
+
+        # Mock storage to return False for experience_exists
+        ingestion.storage.experience_exists.return_value = False
+
+        # Mock embedding client to raise an exception
+        mock_config.get_embedding_client.return_value.embeddings.create.side_effect = (
+            Exception("Embedding API error")
+        )
+
+        with pytest.raises(IngestionError) as exc_info:
+            ingestion.add_experience(experience)
+
+        assert "Failed to add experience" in str(exc_info.value)
+        ingestion.storage.experience_exists.assert_called_once_with("error_task_789")
+
+    def test_add_experience_storage_error(self, ingestion, mock_config):
+        """Test add_experience when storage operation fails."""
+        experience = ExperienceRecord(
+            task_description="Test task",
+            keywords=["test"],
+            action_flow=[
+                ActionStep(
+                    thought="test thought",
+                    action="test action",
+                    target_element_description="test target",
+                )
+            ],
+            preconditions="test preconditions",
+            is_successful=True,
+            source_task_id="storage_error_task",
+        )
+
+        # Mock storage to return False for experience_exists but fail on add
+        ingestion.storage.experience_exists.return_value = False
+        ingestion.storage.add_experiences.side_effect = Exception("Storage error")
+
+        # Mock successful embedding generation
+        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
+            Mock(data=[Mock(embedding=[0.1, 0.2, 0.3])])
+        )
+
+        with pytest.raises(IngestionError) as exc_info:
+            ingestion.add_experience(experience)
+
+        assert "Failed to add experience" in str(exc_info.value)

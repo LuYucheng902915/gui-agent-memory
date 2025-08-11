@@ -902,6 +902,8 @@ class TestConfigurationDefaultValues:
         custom_config.reranker_model = "test-reranker"
         custom_config.experience_llm_model = "test-llm"
         custom_config.chroma_db_path = "/test/path"
+        custom_config.operation_log_dir = "./test_data/test_logs/operations"
+        custom_config.log_enabled = True
 
         with (
             patch("gui_agent_memory.main.get_config", return_value=custom_config),
