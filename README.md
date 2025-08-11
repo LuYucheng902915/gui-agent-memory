@@ -174,14 +174,15 @@ uv run mypy gui_agent_memory tests
 # 执行所有的测试代码
 uv run pytest
 
-# 一次性安装 pre-commit 钩子（需要网络）
+# 一次性安装提交与推送钩子（需要网络）
 uv run pre-commit install
+uv run pre-commit install --hook-type pre-push
 
-# 手动模拟提交阶段（pre-commit hooks 在 commit 阶段的完整检查）
+# 手动模拟提交阶段（pre-commit hooks 在 commit 阶段执行）
 uv run pre-commit run --all-files
 
-# 手动模拟推送阶段（pre-push hooks，在 push 前运行）
-uv run pre-commit run --all-files --hook-stage push
+# 手动模拟推送阶段（pre-push hooks 在 push 前执行）
+uv run pre-commit run --all-files --hook-stage pre-push
 ```
 
 **使用建议：**
