@@ -11,11 +11,16 @@ Implemented with pydantic-settings for declarative env parsing and validation.
 """
 
 import logging
+import os
 from typing import Any
 
 from openai import OpenAI
 from pydantic import Field, ValidationError
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 # Provide a load_dotenv symbol for tests that patch it, without changing runtime behavior
 try:  # pragma: no cover - existence for patching compatibility
@@ -84,7 +89,42 @@ class MemoryConfig(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     # pydantic-settings configuration
-    model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
+    # Load variables from environment and automatically from a project-root .env file.
+    # Priority (high -> low) follows pydantic-settings docs:
+    # init kwargs > env vars > .env > secrets > defaults
+    # Ref: https://docs.pydantic.dev/latest/concepts/pydantic_settings/
+    model_config = SettingsConfigDict(
+        case_sensitive=False,
+        extra="ignore",
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """
+        In tests (pytest), or when explicitly disabled, skip reading .env to ensure
+        deterministic behavior that relies only on process env and defaults.
+
+        Ref: https://docs.pydantic.dev/latest/concepts/pydantic_settings/
+        """
+        disable_dotenv_flag = os.getenv("MEMORY_DISABLE_DOTENV", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        running_pytest = "PYTEST_CURRENT_TEST" in os.environ
+
+        if disable_dotenv_flag or running_pytest:
+            return (init_settings, env_settings, file_secret_settings)
+        return (init_settings, env_settings, dotenv_settings, file_secret_settings)
 
     # Runtime attributes
     logger: logging.Logger | None = None
@@ -93,7 +133,6 @@ class MemoryConfig(BaseSettings):
     experience_llm_client: OpenAI | None = None
 
     def __init__(self, **data: Any) -> None:
-        # Do not implicitly load .env here; rely only on process environment
         try:
             super().__init__(**data)
         except ValidationError as e:
