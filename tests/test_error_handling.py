@@ -337,7 +337,7 @@ class TestEnvironmentErrorHandling:
             assert config is not None
 
     def test_invalid_numeric_env_values(self, monkeypatch):
-        """Test handling of invalid numeric environment values."""
+        """Test handling of invalid numeric environment values (pydantic)."""
         monkeypatch.setenv("DEFAULT_TOP_K", "not_a_number")
         monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-key")
         monkeypatch.setenv("EMBEDDING_LLM_BASE_URL", "https://test.com")
@@ -346,11 +346,11 @@ class TestEnvironmentErrorHandling:
         monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-key")
         monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test.com")
 
-        from gui_agent_memory.config import MemoryConfig
+        from gui_agent_memory.config import ConfigurationError, MemoryConfig
 
         with (
             patch("gui_agent_memory.config.OpenAI"),
-            pytest.raises(ValueError),
+            pytest.raises(ConfigurationError),
         ):
-            # Should raise ValueError when trying to convert "not_a_number" to int
+            # pydantic validation should raise ConfigurationError wrapping ValidationError
             MemoryConfig()

@@ -79,14 +79,14 @@ class MemoryStorage:
             # Get or create experiential memories collection
             self.experiential_collection = self.client.get_or_create_collection(
                 name=self.config.experiential_collection_name,
-                embedding_function=embedding_function,  # type: ignore[arg-type]
+                embedding_function=embedding_function,
                 metadata={"description": "Operational experiences and action flows"},
             )
 
             # Get or create declarative memories collection
             self.declarative_collection = self.client.get_or_create_collection(
                 name=self.config.declarative_collection_name,
-                embedding_function=embedding_function,  # type: ignore[arg-type]
+                embedding_function=embedding_function,
                 metadata={"description": "Semantic knowledge and facts"},
             )
 
@@ -175,8 +175,8 @@ class MemoryStorage:
             self.experiential_collection.add(
                 ids=ids,
                 documents=documents,
-                metadatas=metadatas,  # type: ignore[arg-type]
-                embeddings=embeddings,  # type: ignore[arg-type]
+                metadatas=metadatas,
+                embeddings=embeddings,
             )
 
             return ids
@@ -238,8 +238,8 @@ class MemoryStorage:
             self.declarative_collection.add(
                 ids=ids,
                 documents=documents,
-                metadatas=metadatas,  # type: ignore[arg-type]
-                embeddings=embeddings,  # type: ignore[arg-type]
+                metadatas=metadatas,
+                embeddings=embeddings,
             )
 
             return ids
@@ -271,7 +271,7 @@ class MemoryStorage:
         """
         try:
             result = self.experiential_collection.query(
-                query_embeddings=query_embeddings,  # type: ignore[arg-type]
+                query_embeddings=query_embeddings,
                 query_texts=query_texts,
                 where=where,
                 n_results=n_results,
@@ -304,7 +304,7 @@ class MemoryStorage:
         """
         try:
             result = self.declarative_collection.query(
-                query_embeddings=query_embeddings,  # type: ignore[arg-type]
+                query_embeddings=query_embeddings,
                 query_texts=query_texts,
                 where=where,
                 n_results=n_results,

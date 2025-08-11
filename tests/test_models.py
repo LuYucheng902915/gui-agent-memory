@@ -34,7 +34,7 @@ class TestActionStep:
     def test_action_step_validation_missing_fields(self):
         """Test ActionStep validation with missing required fields."""
         with pytest.raises(ValidationError):
-            ActionStep(  # type: ignore[call-arg]
+            ActionStep(
                 thought="Click button",
                 action="click",
                 # Missing target_element_description
@@ -81,7 +81,7 @@ class TestExperienceRecord:
     def test_experience_record_validation(self):
         """Test ExperienceRecord validation."""
         with pytest.raises(ValidationError):
-            ExperienceRecord(  # type: ignore[call-arg]
+            ExperienceRecord(
                 task_description="Test"
                 # Missing action_flow, preconditions, is_successful, source_task_id
             )
@@ -91,7 +91,7 @@ class TestExperienceRecord:
         with pytest.raises(ValidationError):
             ExperienceRecord(
                 task_description="Test task",
-                action_flow=["invalid_action_step"],  # type: ignore[list-item]
+                action_flow=["invalid_action_step"],
                 preconditions="None",
                 is_successful=True,
                 source_task_id="test_001",
@@ -123,7 +123,7 @@ class TestFactRecord:
     def test_fact_record_validation(self):
         """Test FactRecord validation."""
         with pytest.raises(ValidationError):
-            FactRecord()  # type: ignore[call-arg]
+            FactRecord()
 
 
 class TestRetrievalResult:
@@ -188,7 +188,7 @@ class TestLearningRequest:
     def test_learning_request_validation(self):
         """Test LearningRequest validation."""
         with pytest.raises(ValidationError):
-            LearningRequest(  # type: ignore[call-arg]
+            LearningRequest(
                 raw_history=[]
                 # Missing is_successful and source_task_id
             )

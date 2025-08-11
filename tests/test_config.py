@@ -2,7 +2,6 @@
 Unit tests for the configuration module.
 """
 
-import os
 from unittest.mock import Mock, patch
 
 import pytest
@@ -53,24 +52,17 @@ class TestMemoryConfig:
 
     def test_config_missing_required_env_var(self, monkeypatch):
         """Test configuration failure with missing required environment variable."""
-        # Mock os.getenv to return None for required variables
-        original_getenv = os.getenv
+        # Ensure required env vars are absent
+        for key in [
+            "EMBEDDING_LLM_API_KEY",
+            "EMBEDDING_LLM_BASE_URL",
+            "RERANKER_LLM_API_KEY",
+            "RERANKER_LLM_BASE_URL",
+            "EXPERIENCE_LLM_API_KEY",
+            "EXPERIENCE_LLM_BASE_URL",
+        ]:
+            monkeypatch.delenv(key, raising=False)
 
-        def mock_getenv(key, default=None):
-            if key in [
-                "EMBEDDING_LLM_API_KEY",
-                "EMBEDDING_LLM_BASE_URL",
-                "RERANKER_LLM_API_KEY",
-                "RERANKER_LLM_BASE_URL",
-                "EXPERIENCE_LLM_API_KEY",
-                "EXPERIENCE_LLM_BASE_URL",
-            ]:
-                return None
-            return original_getenv(key, default)
-
-        monkeypatch.setattr(os, "getenv", mock_getenv)
-
-        # Reset config to ensure clean state
         from gui_agent_memory.config import reset_config
 
         reset_config()
@@ -78,7 +70,10 @@ class TestMemoryConfig:
         with pytest.raises(ConfigurationError) as exc_info:
             MemoryConfig()
 
-        assert "missing" in str(exc_info.value).lower()
+        assert (
+            "missing" in str(exc_info.value).lower()
+            or "invalid" in str(exc_info.value).lower()
+        )
 
     def test_config_client_initialization_failure(self, monkeypatch):
         """Test configuration failure during client initialization."""
@@ -102,53 +97,42 @@ class TestMemoryConfig:
 
     def test_config_default_values(self, monkeypatch, mock_openai_client):
         """Test that default configuration values are set correctly."""
+        # Set required env vars for successful initialization
+        monkeypatch.setenv(
+            "EMBEDDING_LLM_BASE_URL", "https://test-embedding.example.com/v1"
+        )
+        monkeypatch.setenv("EMBEDDING_LLM_API_KEY", "test-fake-embedding-key-12345")
+        monkeypatch.setenv(
+            "RERANKER_LLM_BASE_URL", "https://test-reranker.example.com/v1/rerank"
+        )
+        monkeypatch.setenv("RERANKER_LLM_API_KEY", "test-fake-reranker-key-67890")
+        monkeypatch.setenv("EXPERIENCE_LLM_BASE_URL", "https://test-llm.example.com/v1")
+        monkeypatch.setenv("EXPERIENCE_LLM_API_KEY", "test-fake-llm-key-abcdef")
+        # Ensure optional envs are unset to use defaults
+        for key in [
+            "EMBEDDING_MODEL",
+            "RERANKER_MODEL",
+            "EXPERIENCE_LLM_MODEL",
+            "DEFAULT_TOP_K",
+            "DEFAULT_TOP_N",
+            "EMBEDDING_DIMENSION",
+            "CHROMA_DB_PATH",
+            "FAILED_LEARNING_LOG_PATH",
+        ]:
+            monkeypatch.delenv(key, raising=False)
 
-        # Mock os.getenv to return None for all config variables, forcing use of hardcoded defaults
-        def mock_getenv(key, default=None):
-            # Return required env vars for successful initialization
-            if key == "EMBEDDING_LLM_BASE_URL":
-                return "https://test-embedding.example.com/v1"
-            elif key == "EMBEDDING_LLM_API_KEY":
-                return "test-fake-embedding-key-12345"
-            elif key == "RERANKER_LLM_BASE_URL":
-                return "https://test-reranker.example.com/v1/rerank"
-            elif key == "RERANKER_LLM_API_KEY":
-                return "test-fake-reranker-key-67890"
-            elif key == "EXPERIENCE_LLM_BASE_URL":
-                return "https://test-llm.example.com/v1"
-            elif key == "EXPERIENCE_LLM_API_KEY":
-                return "test-fake-llm-key-abcdef"
-            # For optional config vars, return None to use hardcoded defaults
-            elif key in [
-                "EMBEDDING_MODEL",
-                "RERANKER_MODEL",
-                "EXPERIENCE_LLM_MODEL",
-                "DEFAULT_TOP_K",
-                "DEFAULT_TOP_N",
-                "EMBEDDING_DIMENSION",
-                "CHROMA_DB_PATH",
-                "FAILED_LEARNING_LOG_PATH",
-            ]:
-                return default
-            else:
-                return default
-
-        monkeypatch.setattr(os, "getenv", mock_getenv)
-        # Mock load_dotenv to prevent loading the real .env file
         with patch("gui_agent_memory.config.load_dotenv"):
             with patch(
                 "gui_agent_memory.config.OpenAI", return_value=mock_openai_client
             ):
                 config = MemoryConfig()
 
-                assert config.embedding_model == "Qwen3-Embedding-8B"
-                assert config.reranker_model == "Qwen3-Reranker-8B"
-                assert config.experience_llm_model == "gpt-4o"
-                assert config.default_top_k == 20
-                assert (
-                    config.default_top_n == 3
-                )  # This should be the actual default from config.py
-                assert config.embedding_dimension == 1024
+        assert config.embedding_model == "Qwen3-Embedding-8B"
+        assert config.reranker_model == "Qwen3-Reranker-8B"
+        assert config.experience_llm_model == "gpt-4o"
+        assert config.default_top_k == 20
+        assert config.default_top_n == 3
+        assert config.embedding_dimension == 1024
 
     def test_config_custom_env_values(self, monkeypatch, mock_openai_client):
         """Test configuration with custom environment values."""
@@ -225,15 +209,8 @@ class TestConfigModule:
         """Test get_config with missing environment variables."""
         reset_config()
 
-        # Mock os.getenv to return None for required variables
-        original_getenv = os.getenv
-
-        def mock_getenv(key, default=None):
-            if key == "EMBEDDING_LLM_API_KEY":
-                return None
-            return original_getenv(key, default)
-
-        monkeypatch.setattr(os, "getenv", mock_getenv)
+        # Remove a required env var
+        monkeypatch.delenv("EMBEDDING_LLM_API_KEY", raising=False)
 
         with pytest.raises(ConfigurationError):
             get_config()

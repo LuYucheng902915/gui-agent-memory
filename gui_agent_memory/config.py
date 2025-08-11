@@ -6,108 +6,104 @@ This module handles:
 - Initializing AI service clients
 - Managing system-wide configuration
 - Fail-fast validation of required settings
+
+Implemented with pydantic-settings for declarative env parsing and validation.
 """
 
 import logging
-import os
+from typing import Any
 
-from dotenv import load_dotenv
 from openai import OpenAI
+from pydantic import Field, ValidationError
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Provide a load_dotenv symbol for tests that patch it, without changing runtime behavior
+try:  # pragma: no cover - existence for patching compatibility
+    from dotenv import load_dotenv as _real_load_dotenv
+except Exception:  # pragma: no cover
+    _real_load_dotenv = None
+
+
+def load_dotenv(*args: Any, **kwargs: Any) -> None:
+    """Compatibility wrapper for tests; runtime does not rely on it."""
+    if _real_load_dotenv is not None:
+        _real_load_dotenv(*args, **kwargs)
+    return None
 
 
 class ConfigurationError(Exception):
     """Raised when required configuration is missing or invalid."""
 
 
-class MemoryConfig:
+class MemoryConfig(BaseSettings):
     """
-    Central configuration class for the memory system.
-
-    Implements fail-fast strategy - raises ConfigurationError immediately
-    if required environment variables are missing.
+    Configuration using pydantic-settings, with validation and env aliases.
     """
 
-    def __init__(self) -> None:
-        """Initialize configuration by loading environment variables."""
-        # Load environment variables from .env file if it exists
-        load_dotenv()
+    # Embedding LLM Service (required)
+    embedding_llm_base_url: str = Field(alias="EMBEDDING_LLM_BASE_URL")
+    embedding_llm_api_key: str = Field(alias="EMBEDDING_LLM_API_KEY")
 
-        # Initialize logger
+    # Reranker LLM Service (required)
+    reranker_llm_base_url: str = Field(alias="RERANKER_LLM_BASE_URL")
+    reranker_llm_api_key: str = Field(alias="RERANKER_LLM_API_KEY")
+
+    # Experience LLM Configuration (required)
+    experience_llm_base_url: str = Field(alias="EXPERIENCE_LLM_BASE_URL")
+    experience_llm_api_key: str = Field(alias="EXPERIENCE_LLM_API_KEY")
+
+    # Model Configuration (optional)
+    embedding_model: str = Field(default="Qwen3-Embedding-8B", alias="EMBEDDING_MODEL")
+    reranker_model: str = Field(default="Qwen3-Reranker-8B", alias="RERANKER_MODEL")
+    experience_llm_model: str = Field(default="gpt-4o", alias="EXPERIENCE_LLM_MODEL")
+
+    # ChromaDB Configuration
+    chroma_db_path: str = Field(
+        default="./memory_system/data/chroma", alias="CHROMA_DB_PATH"
+    )
+    experiential_collection_name: str = Field(default="experiential_memories")
+    declarative_collection_name: str = Field(default="declarative_memories")
+
+    # Retrieval Configuration
+    default_top_k: int = Field(default=20, alias="DEFAULT_TOP_K")
+    default_top_n: int = Field(default=3, alias="DEFAULT_TOP_N")
+    embedding_dimension: int = Field(default=1024, alias="EMBEDDING_DIMENSION")
+
+    # Logging Configuration
+    failed_learning_log_path: str = Field(
+        default="./memory_system/logs/failed_learning_tasks.jsonl",
+        alias="FAILED_LEARNING_LOG_PATH",
+    )
+    prompt_log_dir: str = Field(
+        default="./memory_system/logs/prompts", alias="PROMPT_LOG_DIR"
+    )
+    operation_log_dir: str = Field(
+        default="./memory_system/logs/operations", alias="OPERATION_LOG_DIR"
+    )
+    log_enabled: bool = Field(default=True, alias="LOG_ENABLED")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
+    # pydantic-settings configuration
+    model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
+
+    # Runtime attributes
+    logger: logging.Logger | None = None
+    embedding_llm_client: OpenAI | None = None
+    reranker_llm_client: OpenAI | None = None
+    experience_llm_client: OpenAI | None = None
+
+    def __init__(self, **data: Any) -> None:
+        # Do not implicitly load .env here; rely only on process environment
+        try:
+            super().__init__(**data)
+        except ValidationError as e:
+            raise ConfigurationError(f"Missing or invalid configuration: {e}") from e
+
         self.logger = logging.getLogger(__name__)
-
-        # Embedding LLM Service (any OpenAI-compatible embedding endpoint)
-        self.embedding_llm_base_url = self._get_required_env("EMBEDDING_LLM_BASE_URL")
-        self.embedding_llm_api_key = self._get_required_env("EMBEDDING_LLM_API_KEY")
-
-        # Reranker LLM Service (any OpenAI-compatible reranker endpoint)
-        self.reranker_llm_base_url = self._get_required_env("RERANKER_LLM_BASE_URL")
-        self.reranker_llm_api_key = self._get_required_env("RERANKER_LLM_API_KEY")
-
-        # Experience LLM Configuration
-        self.experience_llm_base_url = self._get_required_env("EXPERIENCE_LLM_BASE_URL")
-        self.experience_llm_api_key = self._get_required_env("EXPERIENCE_LLM_API_KEY")
-
-        # Model Configuration
-        self.embedding_model = os.getenv("EMBEDDING_MODEL", "Qwen3-Embedding-8B")
-        self.reranker_model = os.getenv("RERANKER_MODEL", "Qwen3-Reranker-8B")
-        self.experience_llm_model = os.getenv("EXPERIENCE_LLM_MODEL", "gpt-4o")
-
-        # ChromaDB Configuration
-        self.chroma_db_path = os.getenv("CHROMA_DB_PATH", "./memory_system/data/chroma")
-        self.experiential_collection_name = "experiential_memories"
-        self.declarative_collection_name = "declarative_memories"
-
-        # Retrieval Configuration
-        self.default_top_k = int(os.getenv("DEFAULT_TOP_K", "20"))
-        self.default_top_n = int(os.getenv("DEFAULT_TOP_N", "3"))
-        self.embedding_dimension = int(os.getenv("EMBEDDING_DIMENSION", "1024"))
-
-        # Logging Configuration
-        self.failed_learning_log_path = os.getenv(
-            "FAILED_LEARNING_LOG_PATH",
-            "./memory_system/logs/failed_learning_tasks.jsonl",
-        )
-        # Prompt logging (inputs and LLM outputs)
-        self.prompt_log_dir = os.getenv(
-            "PROMPT_LOG_DIR",
-            "./memory_system/logs/prompts",
-        )
-        # Operation logging - per API call logs
-        self.operation_log_dir = os.getenv(
-            "OPERATION_LOG_DIR",
-            "./memory_system/logs/operations",
-        )
-        self.log_enabled = os.getenv("LOG_ENABLED", "true").lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
-        self.log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-
-        # Initialize clients
+        # Normalize log level
+        if isinstance(self.log_level, str):
+            self.log_level = self.log_level.upper()
         self._init_clients()
-
-    def _get_required_env(self, key: str) -> str:
-        """
-        Get a required environment variable.
-
-        Args:
-            key: Environment variable name
-
-        Returns:
-            Environment variable value
-
-        Raises:
-            ConfigurationError: If the required environment variable is missing
-        """
-        value = os.getenv(key)
-        if not value:
-            raise ConfigurationError(
-                f"Required environment variable '{key}' is missing. "
-                f"Please set it in your .env file or environment."
-            )
-        return value
 
     def _init_clients(self) -> None:
         """Initialize AI service clients."""
@@ -137,14 +133,20 @@ class MemoryConfig:
 
     def get_embedding_client(self) -> OpenAI:
         """Get the embedding LLM client (OpenAI-compatible)."""
+        if self.embedding_llm_client is None:
+            raise ConfigurationError("Embedding client is not initialized")
         return self.embedding_llm_client
 
     def get_reranker_client(self) -> OpenAI:
         """Get the reranker LLM client (OpenAI-compatible)."""
+        if self.reranker_llm_client is None:
+            raise ConfigurationError("Reranker client is not initialized")
         return self.reranker_llm_client
 
     def get_experience_llm_client(self) -> OpenAI:
         """Get the experience distillation LLM client."""
+        if self.experience_llm_client is None:
+            raise ConfigurationError("Experience LLM client is not initialized")
         return self.experience_llm_client
 
     def validate_configuration(self) -> bool:
@@ -159,10 +161,14 @@ class MemoryConfig:
         """
         try:
             # Test embedding client
+            if self.embedding_llm_client is None:
+                raise ConfigurationError("Embedding client not initialized")
             self.embedding_llm_client.models.list()
 
             # Test reranker client - try models.list() first, fallback to actual API call
             try:
+                if self.reranker_llm_client is None:
+                    raise ConfigurationError("Reranker client not initialized")
                 self.reranker_llm_client.models.list()
             except Exception:
                 # If models.list() fails, test with actual reranker API call
@@ -196,6 +202,8 @@ class MemoryConfig:
                     ) from e
 
             # Test experience LLM client
+            if self.experience_llm_client is None:
+                raise ConfigurationError("Experience client not initialized")
             self.experience_llm_client.models.list()
 
             return True

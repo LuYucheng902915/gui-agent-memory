@@ -48,17 +48,12 @@ def write_text_file(path: Path, content: str) -> None:
 
 
 def _serialize(obj: Any) -> Any:
-    try:
-        from pydantic import BaseModel
-    except Exception:  # pragma: no cover - pydantic always installed here
-        BaseModel = None  # type: ignore
-
-    if BaseModel is not None and isinstance(obj, BaseModel):
-        # pydantic v2
+    # Duck-typing: prefer model_dump if available (pydantic v2)
+    if hasattr(obj, "model_dump"):
         try:
             return obj.model_dump()
         except Exception:  # pragma: no cover
-            logging.getLogger(__name__).debug("Failed to serialize pydantic model")
+            logging.getLogger(__name__).debug("Failed to serialize pydantic-like model")
             return str(obj)
 
     if isinstance(obj, dict):
