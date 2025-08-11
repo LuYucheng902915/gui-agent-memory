@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from gui_agent_memory import MemorySystem
+from gui_agent_memory.config import get_config
 
 
 def print_separator(title: str):
@@ -36,6 +37,10 @@ def demonstrate_system_initialization_and_validation():
         print("🔧 正在初始化记忆系统...")
         memory = MemorySystem()
         print("✅ 记忆系统初始化成功")
+        try:
+            print("🧩 当前配置(去敏):", get_config().debug_dump())
+        except Exception as e:
+            print(f"🧩 配置快照输出失败: {e}")
 
         # 2. 验证系统配置
         print("\n🔍 正在验证系统配置...")
@@ -60,7 +65,11 @@ def demonstrate_system_initialization_and_validation():
 
     except Exception as e:
         print(f"❌ 系统初始化失败: {e}")
-        print("请确保您的 .env 文件中已配置了有效的API密钥")
+        try:
+            print("🧩 当前配置(去敏):", get_config().debug_dump())
+        except Exception as dump_err:
+            print(f"🧩 配置快照输出失败: {dump_err}")
+        print("请确保您的 .env 文件中已配置了有效的API密钥，并存在 prompts 模板")
         return None
 
 

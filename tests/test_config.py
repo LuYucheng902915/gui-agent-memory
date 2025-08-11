@@ -37,16 +37,28 @@ class TestMemoryConfig:
 
             # Test with FAKE test environment values - NOT real API keys!
             assert (
-                config.embedding_llm_base_url == "https://test-embedding.example.com/v1"
+                str(config.embedding_llm_base_url)
+                == "https://test-embedding.example.com/v1"
             )
-            assert config.embedding_llm_api_key == "test-fake-embedding-key-12345"
             assert (
-                config.reranker_llm_base_url
+                config.embedding_llm_api_key.get_secret_value()
+                == "test-fake-embedding-key-12345"
+            )
+            assert (
+                str(config.reranker_llm_base_url)
                 == "https://test-reranker.example.com/v1/rerank"
             )
-            assert config.reranker_llm_api_key == "test-fake-reranker-key-67890"
-            assert config.experience_llm_base_url == "https://test-llm.example.com/v1"
-            assert config.experience_llm_api_key == "test-fake-llm-key-abcdef"
+            assert (
+                config.reranker_llm_api_key.get_secret_value()
+                == "test-fake-reranker-key-67890"
+            )
+            assert (
+                str(config.experience_llm_base_url) == "https://test-llm.example.com/v1"
+            )
+            assert (
+                config.experience_llm_api_key.get_secret_value()
+                == "test-fake-llm-key-abcdef"
+            )
             assert config.embedding_model == "Qwen3-Embedding-8B"
             assert config.reranker_model == "Qwen3-Reranker-8B"
 

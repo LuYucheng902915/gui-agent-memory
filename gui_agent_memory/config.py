@@ -13,10 +13,11 @@ Implemented with pydantic-settings for declarative env parsing and validation.
 import logging
 import os
 import threading
+from pathlib import Path
 from typing import Any
 
 from openai import OpenAI
-from pydantic import Field, ValidationError
+from pydantic import AnyUrl, Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -47,16 +48,16 @@ class MemoryConfig(BaseSettings):
     """
 
     # Embedding LLM Service (required)
-    embedding_llm_base_url: str = Field(alias="EMBEDDING_LLM_BASE_URL")
-    embedding_llm_api_key: str = Field(alias="EMBEDDING_LLM_API_KEY")
+    embedding_llm_base_url: AnyUrl = Field(alias="EMBEDDING_LLM_BASE_URL")
+    embedding_llm_api_key: SecretStr = Field(alias="EMBEDDING_LLM_API_KEY")
 
     # Reranker LLM Service (required)
-    reranker_llm_base_url: str = Field(alias="RERANKER_LLM_BASE_URL")
-    reranker_llm_api_key: str = Field(alias="RERANKER_LLM_API_KEY")
+    reranker_llm_base_url: AnyUrl = Field(alias="RERANKER_LLM_BASE_URL")
+    reranker_llm_api_key: SecretStr = Field(alias="RERANKER_LLM_API_KEY")
 
     # Experience LLM Configuration (required)
-    experience_llm_base_url: str = Field(alias="EXPERIENCE_LLM_BASE_URL")
-    experience_llm_api_key: str = Field(alias="EXPERIENCE_LLM_API_KEY")
+    experience_llm_base_url: AnyUrl = Field(alias="EXPERIENCE_LLM_BASE_URL")
+    experience_llm_api_key: SecretStr = Field(alias="EXPERIENCE_LLM_API_KEY")
 
     # Model Configuration (optional)
     embedding_model: str = Field(default="Qwen3-Embedding-8B", alias="EMBEDDING_MODEL")
@@ -64,8 +65,8 @@ class MemoryConfig(BaseSettings):
     experience_llm_model: str = Field(default="gpt-4o", alias="EXPERIENCE_LLM_MODEL")
 
     # ChromaDB Configuration
-    chroma_db_path: str = Field(
-        default="./memory_system/data/chroma", alias="CHROMA_DB_PATH"
+    chroma_db_path: Path = Field(
+        default=Path("./memory_system/data/chroma"), alias="CHROMA_DB_PATH"
     )
     experiential_collection_name: str = Field(default="experiential_memories")
     declarative_collection_name: str = Field(default="declarative_memories")
@@ -76,20 +77,31 @@ class MemoryConfig(BaseSettings):
     embedding_dimension: int = Field(default=1024, alias="EMBEDDING_DIMENSION")
 
     # Logging Configuration
-    failed_learning_log_path: str = Field(
-        default="./memory_system/logs/failed_learning_tasks.jsonl",
+    failed_learning_log_path: Path = Field(
+        default=Path("./memory_system/logs/failed_learning_tasks.jsonl"),
         alias="FAILED_LEARNING_LOG_PATH",
     )
-    prompt_log_dir: str = Field(
-        default="./memory_system/logs/prompts", alias="PROMPT_LOG_DIR"
+    prompt_log_dir: Path = Field(
+        default=Path("./memory_system/logs/prompts"), alias="PROMPT_LOG_DIR"
     )
-    operation_log_dir: str = Field(
-        default="./memory_system/logs/operations", alias="OPERATION_LOG_DIR"
+    operation_log_dir: Path = Field(
+        default=Path("./memory_system/logs/operations"), alias="OPERATION_LOG_DIR"
     )
     log_enabled: bool = Field(default=True, alias="LOG_ENABLED")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     # Optional: external prompt templates directory; if empty, use packaged prompts
-    prompt_templates_dir: str = Field(default="", alias="PROMPT_TEMPLATES_DIR")
+    prompt_templates_dir: Path | None = Field(
+        default=None, alias="PROMPT_TEMPLATES_DIR"
+    )
+
+    @field_validator("prompt_templates_dir", mode="before")
+    @classmethod
+    def _normalize_prompt_dir(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
     # Advanced/infra Configuration
     chroma_anonymized_telemetry: bool = Field(
@@ -160,20 +172,20 @@ class MemoryConfig(BaseSettings):
         try:
             # Initialize embedding LLM client (OpenAI-compatible)
             self.embedding_llm_client = OpenAI(
-                api_key=self.embedding_llm_api_key,
-                base_url=self.embedding_llm_base_url,
+                api_key=self.embedding_llm_api_key.get_secret_value(),
+                base_url=str(self.embedding_llm_base_url),
             )
 
             # Initialize reranker LLM client (OpenAI-compatible)
             self.reranker_llm_client = OpenAI(
-                api_key=self.reranker_llm_api_key,
-                base_url=self.reranker_llm_base_url,
+                api_key=self.reranker_llm_api_key.get_secret_value(),
+                base_url=str(self.reranker_llm_base_url),
             )
 
             # Initialize Experience LLM client (OpenAI-compatible)
             self.experience_llm_client = OpenAI(
-                api_key=self.experience_llm_api_key,
-                base_url=self.experience_llm_base_url,
+                api_key=self.experience_llm_api_key.get_secret_value(),
+                base_url=str(self.experience_llm_base_url),
             )
 
         except Exception as e:
@@ -226,7 +238,7 @@ class MemoryConfig(BaseSettings):
                     import requests
 
                     response = requests.post(
-                        self.reranker_llm_base_url,
+                        str(self.reranker_llm_base_url),
                         json={
                             "query": "test",
                             "documents": ["test document"],
@@ -234,7 +246,7 @@ class MemoryConfig(BaseSettings):
                         },
                         headers={
                             "X-Failover-Enabled": "true",
-                            "Authorization": f"Bearer {self.reranker_llm_api_key}",
+                            "Authorization": f"Bearer {self.reranker_llm_api_key.get_secret_value()}",
                             "Content-Type": "application/json",
                         },
                         timeout=self.http_timeout_seconds,
@@ -259,6 +271,49 @@ class MemoryConfig(BaseSettings):
             return True
         except Exception as e:
             raise ConfigurationError(f"Configuration validation failed: {e}") from e
+
+    def debug_dump(self) -> dict[str, Any]:
+        """Return a sanitized snapshot of current config (secrets masked)."""
+
+        def mask(secret: SecretStr | str) -> str:
+            val = (
+                secret.get_secret_value()
+                if isinstance(secret, SecretStr)
+                else str(secret)
+            )
+            if not val:
+                return ""
+            return (val[:2] + "***" + val[-2:]) if len(val) > 4 else "***"
+
+        return {
+            "embedding_llm_base_url": str(self.embedding_llm_base_url),
+            "embedding_llm_api_key": mask(self.embedding_llm_api_key),
+            "reranker_llm_base_url": str(self.reranker_llm_base_url),
+            "reranker_llm_api_key": mask(self.reranker_llm_api_key),
+            "experience_llm_base_url": str(self.experience_llm_base_url),
+            "experience_llm_api_key": mask(self.experience_llm_api_key),
+            "embedding_model": self.embedding_model,
+            "reranker_model": self.reranker_model,
+            "experience_llm_model": self.experience_llm_model,
+            "chroma_db_path": str(self.chroma_db_path),
+            "experiential_collection_name": self.experiential_collection_name,
+            "declarative_collection_name": self.declarative_collection_name,
+            "default_top_k": self.default_top_k,
+            "default_top_n": self.default_top_n,
+            "embedding_dimension": self.embedding_dimension,
+            "failed_learning_log_path": str(self.failed_learning_log_path),
+            "prompt_log_dir": str(self.prompt_log_dir),
+            "operation_log_dir": str(self.operation_log_dir),
+            "prompt_templates_dir": str(self.prompt_templates_dir)
+            if self.prompt_templates_dir
+            else None,
+            "log_enabled": self.log_enabled,
+            "log_level": self.log_level,
+            "chroma_anonymized_telemetry": self.chroma_anonymized_telemetry,
+            "rerank_candidate_limit": self.rerank_candidate_limit,
+            "hybrid_topk_multiplier": self.hybrid_topk_multiplier,
+            "http_timeout_seconds": self.http_timeout_seconds,
+        }
 
 
 # Global configuration instance
