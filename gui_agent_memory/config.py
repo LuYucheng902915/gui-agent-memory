@@ -18,6 +18,7 @@ from typing import Any
 
 from openai import OpenAI
 from pydantic import AnyUrl, Field, SecretStr, ValidationError, field_validator
+from pydantic.fields import PrivateAttr
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -149,11 +150,11 @@ class MemoryConfig(BaseSettings):
             return (init_settings, env_settings, file_secret_settings)
         return (init_settings, env_settings, dotenv_settings, file_secret_settings)
 
-    # Runtime attributes
-    logger: logging.Logger | None = None
-    embedding_llm_client: OpenAI | None = None
-    reranker_llm_client: OpenAI | None = None
-    experience_llm_client: OpenAI | None = None
+    # Runtime attributes (not part of settings fields)
+    _logger: logging.Logger | None = PrivateAttr(default=None)
+    _embedding_llm_client: OpenAI | None = PrivateAttr(default=None)
+    _reranker_llm_client: OpenAI | None = PrivateAttr(default=None)
+    _experience_llm_client: OpenAI | None = PrivateAttr(default=None)
 
     def __init__(self, **data: Any) -> None:
         try:
@@ -161,7 +162,7 @@ class MemoryConfig(BaseSettings):
         except ValidationError as e:
             raise ConfigurationError(f"Missing or invalid configuration: {e}") from e
 
-        self.logger = logging.getLogger(__name__)
+        self._logger = logging.getLogger(__name__)
         # Normalize log level
         if isinstance(self.log_level, str):
             self.log_level = self.log_level.upper()
@@ -171,19 +172,19 @@ class MemoryConfig(BaseSettings):
         """Initialize AI service clients."""
         try:
             # Initialize embedding LLM client (OpenAI-compatible)
-            self.embedding_llm_client = OpenAI(
+            self._embedding_llm_client = OpenAI(
                 api_key=self.embedding_llm_api_key.get_secret_value(),
                 base_url=str(self.embedding_llm_base_url),
             )
 
             # Initialize reranker LLM client (OpenAI-compatible)
-            self.reranker_llm_client = OpenAI(
+            self._reranker_llm_client = OpenAI(
                 api_key=self.reranker_llm_api_key.get_secret_value(),
                 base_url=str(self.reranker_llm_base_url),
             )
 
             # Initialize Experience LLM client (OpenAI-compatible)
-            self.experience_llm_client = OpenAI(
+            self._experience_llm_client = OpenAI(
                 api_key=self.experience_llm_api_key.get_secret_value(),
                 base_url=str(self.experience_llm_base_url),
             )
@@ -195,21 +196,21 @@ class MemoryConfig(BaseSettings):
 
     def get_embedding_client(self) -> OpenAI:
         """Get the embedding LLM client (OpenAI-compatible)."""
-        if self.embedding_llm_client is None:
+        if self._embedding_llm_client is None:
             raise ConfigurationError("Embedding client is not initialized")
-        return self.embedding_llm_client
+        return self._embedding_llm_client
 
     def get_reranker_client(self) -> OpenAI:
         """Get the reranker LLM client (OpenAI-compatible)."""
-        if self.reranker_llm_client is None:
+        if self._reranker_llm_client is None:
             raise ConfigurationError("Reranker client is not initialized")
-        return self.reranker_llm_client
+        return self._reranker_llm_client
 
     def get_experience_llm_client(self) -> OpenAI:
         """Get the experience distillation LLM client."""
-        if self.experience_llm_client is None:
+        if self._experience_llm_client is None:
             raise ConfigurationError("Experience LLM client is not initialized")
-        return self.experience_llm_client
+        return self._experience_llm_client
 
     def validate_configuration(self) -> bool:
         """
@@ -223,15 +224,15 @@ class MemoryConfig(BaseSettings):
         """
         try:
             # Test embedding client
-            if self.embedding_llm_client is None:
+            if self._embedding_llm_client is None:
                 raise ConfigurationError("Embedding client not initialized")
-            self.embedding_llm_client.models.list()
+            self._embedding_llm_client.models.list()
 
             # Test reranker client - try models.list() first, fallback to actual API call
             try:
-                if self.reranker_llm_client is None:
+                if self._reranker_llm_client is None:
                     raise ConfigurationError("Reranker client not initialized")
-                self.reranker_llm_client.models.list()
+                self._reranker_llm_client.models.list()
             except Exception:
                 # If models.list() fails, test with actual reranker API call
                 try:
@@ -264,9 +265,9 @@ class MemoryConfig(BaseSettings):
                     ) from e
 
             # Test experience LLM client
-            if self.experience_llm_client is None:
+            if self._experience_llm_client is None:
                 raise ConfigurationError("Experience client not initialized")
-            self.experience_llm_client.models.list()
+            self._experience_llm_client.models.list()
 
             return True
         except Exception as e:
