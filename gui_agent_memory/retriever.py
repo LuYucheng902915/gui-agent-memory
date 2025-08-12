@@ -522,7 +522,7 @@ class MemoryRetriever:
 
             headers = {
                 "X-Failover-Enabled": "true",
-                "Authorization": f"Bearer {self.config.reranker_llm_api_key}",
+                "Authorization": f"Bearer {self.config.reranker_llm_api_key.get_secret_value()}",
                 "Content-Type": "application/json",
             }
 
@@ -535,7 +535,7 @@ class MemoryRetriever:
 
             # Call reranker API
             response = requests.post(
-                self.config.reranker_llm_base_url,
+                str(self.config.reranker_llm_base_url),
                 headers=headers,
                 json=payload,
                 timeout=self.config.http_timeout_seconds,

@@ -71,9 +71,16 @@ class MemoryIngestion:
         """Load prompt templates from files."""
         try:
             # Prefer external templates if configured; otherwise use packaged defaults
-            templates_dir = getattr(self.config, "prompt_templates_dir", "")
-            if templates_dir and isinstance(templates_dir, str):
+            templates_dir = getattr(self.config, "prompt_templates_dir", None)
+            base: Path
+            if templates_dir:
                 base = Path(templates_dir)
+                external_ok = (base / "experience_distillation.txt").exists() and (
+                    base / "keyword_extraction.txt"
+                ).exists()
+                if not external_ok:
+                    # Fallback to packaged prompts if any file missing
+                    base = Path(__file__).parent / "prompts"
             else:
                 base = Path(__file__).parent / "prompts"
 

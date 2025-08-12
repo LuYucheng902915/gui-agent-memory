@@ -285,6 +285,20 @@ class MemoryConfig(BaseSettings):
                 return ""
             return (val[:2] + "***" + val[-2:]) if len(val) > 4 else "***"
 
+        # Diagnose current dotenv loading mode for observability only
+        disable_dotenv_flag = os.getenv("MEMORY_DISABLE_DOTENV", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        running_pytest = "PYTEST_CURRENT_TEST" in os.environ
+        if running_pytest:
+            dotenv_mode = "skipped_by_pytest"
+        elif disable_dotenv_flag:
+            dotenv_mode = "skipped_by_env"
+        else:
+            dotenv_mode = "enabled"
+
         return {
             "embedding_llm_base_url": str(self.embedding_llm_base_url),
             "embedding_llm_api_key": mask(self.embedding_llm_api_key),
@@ -313,6 +327,7 @@ class MemoryConfig(BaseSettings):
             "rerank_candidate_limit": self.rerank_candidate_limit,
             "hybrid_topk_multiplier": self.hybrid_topk_multiplier,
             "http_timeout_seconds": self.http_timeout_seconds,
+            "dotenv_mode": dotenv_mode,
         }
 
 
