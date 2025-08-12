@@ -14,6 +14,7 @@ from typing import Any
 
 import jieba
 import requests
+from pydantic import SecretStr
 
 from .config import MemoryConfig, get_config
 from .models import ActionStep, ExperienceRecord, FactRecord, RetrievalResult
@@ -520,9 +521,17 @@ class MemoryRetriever:
 
             # Use requests to call the reranker API directly (as per official docs)
 
+            # Support both SecretStr and plain str for tests/mocks
+            api_key_obj = getattr(self.config, "reranker_llm_api_key", "")
+            api_key = (
+                api_key_obj.get_secret_value()
+                if isinstance(api_key_obj, SecretStr)
+                else str(api_key_obj)
+            )
+
             headers = {
                 "X-Failover-Enabled": "true",
-                "Authorization": f"Bearer {self.config.reranker_llm_api_key.get_secret_value()}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
 
