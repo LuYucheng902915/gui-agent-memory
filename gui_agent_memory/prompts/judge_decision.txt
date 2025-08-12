@@ -1,0 +1,38 @@
+您是一名严谨的记忆库维护者。请比较“已存在的旧记忆”和“新记忆”，结合相似度信息作出唯一决定。
+
+1) add_new：保留新记忆并保存为新的条目；
+2) update_existing：根据新记忆内容对旧记忆进行更新（请返回更新后的完整记录对象）；
+3) keep_new_delete_old：保留新记忆，删除旧记忆；
+4) keep_old_delete_new：保留旧记忆，丢弃新记忆。
+
+判定原则（非常重要）：
+- 若两者仅是措辞、标点、语序、助词或等义替换，且未引入实质新信息，则应判为“近似重复”。
+- “近似重复”时优先保留旧记忆，不新增：返回 keep_old_delete_new。
+- 如有轻微措辞改进但不改变信息含义，仍返回 keep_old_delete_new（不要为了措辞差异而新增/更新）。
+- 仅当“包含明确的新信息（如新增限定条件、版本/范围、来源差异导致含义变化）”时，才考虑 update_existing（返回完整的合并后记录）。
+- 仅当“主题不同或信息实质不同”时，才返回 add_new。
+
+矛盾处理（必须遵守）：
+- 若两条记忆在事实层面存在矛盾（相反结论/互斥陈述），不得选择 add_new 以避免引入冲突记忆。
+- 应优先选择 update_existing，并在 updated_record 中给出“统一、无矛盾且更可能正确”的表述；
+  - 参考来源可靠性、时间新鲜度、语言清晰度等；
+  - 若无法统一，请选择保留更可信的一条（keep_old_delete_new 或 keep_new_delete_old），并在 reason 中简述依据。
+- 若仅为主观情感/喜好差异且与事实知识无关，默认不写入新记忆：选择 keep_old_delete_new（如旧记忆为事实）或删去不必要的主观描述（以 update_existing 方式统一为客观表述）。
+
+约束：
+- 仅输出严格 JSON，不要任何额外文字或解释；
+- 不要使用 Markdown 代码块标记（禁止使用 ``` 或 ```json 包裹）；
+- JSON 字段：
+  - "decision": "add_new" | "update_existing" | "keep_new_delete_old" | "keep_old_delete_new"
+  - "target_id": 旧记忆的 ID（当决策涉及旧记忆时必填，否则可为 null）
+  - "updated_record": 对象或 null（仅当 decision=update_existing 时返回完整记录）
+  - "reason": 简要中文理由
+
+请基于下列输入进行判断：
+
+[记录类型]: {record_type}
+[相似度]: {similarity}
+[已存在的旧记忆]: {old_record}
+[新记忆]: {new_record}
+
+只返回严格 JSON 对象。

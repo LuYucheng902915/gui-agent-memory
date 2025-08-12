@@ -76,6 +76,10 @@ class MemoryConfig(BaseSettings):
     default_top_k: int = Field(default=20, alias="DEFAULT_TOP_K")
     default_top_n: int = Field(default=3, alias="DEFAULT_TOP_N")
     embedding_dimension: int = Field(default=1024, alias="EMBEDDING_DIMENSION")
+    # Similarity policy threshold for LLM judge routing
+    similarity_threshold_judge: float = Field(
+        default=0.80, alias="SIMILARITY_THRESHOLD_JUDGE"
+    )
 
     # Logging Configuration
     failed_learning_log_path: Path = Field(
@@ -316,6 +320,7 @@ class MemoryConfig(BaseSettings):
             "default_top_k": self.default_top_k,
             "default_top_n": self.default_top_n,
             "embedding_dimension": self.embedding_dimension,
+            "similarity_threshold_judge": self.similarity_threshold_judge,
             "failed_learning_log_path": str(self.failed_learning_log_path),
             "prompt_log_dir": str(self.prompt_log_dir),
             "operation_log_dir": str(self.operation_log_dir),

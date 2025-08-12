@@ -70,8 +70,8 @@ class MemoryIngestion:
 
     def _load_prompts(self) -> None:
         """Load prompt templates from files."""
+        # First, resolve base directory and load the two primary templates.
         try:
-            # Prefer external templates if configured; otherwise use packaged defaults
             templates_dir = getattr(self.config, "prompt_templates_dir", None)
             base: Path
             if templates_dir:
@@ -80,7 +80,6 @@ class MemoryIngestion:
                     base / "keyword_extraction.txt"
                 ).exists()
                 if not external_ok:
-                    # Fallback to packaged prompts if any file missing
                     base = Path(__file__).parent / "prompts"
             else:
                 base = Path(__file__).parent / "prompts"
@@ -96,9 +95,40 @@ class MemoryIngestion:
             self.keyword_extraction_prompt = keyword_prompt_path.read_text(
                 encoding="utf-8"
             )
-
         except Exception as e:
             raise IngestionError(f"Failed to load prompt templates: {e}") from e
+
+        # Then, try to load the optional judge template without failing the whole loading flow.
+        judge_prompt_path = base / "judge_decision.txt"
+        if judge_prompt_path.exists():
+            try:
+                self.judge_decision_prompt = judge_prompt_path.read_text(
+                    encoding="utf-8"
+                )
+            except Exception:
+                # Minimal fallback when read_text is patched with limited side effects in tests
+                self.judge_decision_prompt = (
+                    "请在 add_new / update_existing / keep_new_delete_old / keep_old_delete_new 中选择其一，"
+                    "只输出严格 JSON：{\n"
+                    '  "decision": "add_new|update_existing|keep_new_delete_old|keep_old_delete_new",\n'
+                    '  "target_id": null,\n'
+                    '  "updated_record": null,\n'
+                    '  "reason": ""\n'
+                    "}\n"
+                    "[记录类型]: {record_type}\n[已存在的旧记忆]: {old_record}\n[新记忆]: {new_record}"
+                )
+        else:
+            # Fallback when template is absent (e.g., external dir provides only two files)
+            self.judge_decision_prompt = (
+                "请在 add_new / update_existing / keep_new_delete_old / keep_old_delete_new 中选择其一，"
+                "只输出严格 JSON：{\n"
+                '  "decision": "add_new|update_existing|keep_new_delete_old|keep_old_delete_new",\n'
+                '  "target_id": null,\n'
+                '  "updated_record": null,\n'
+                '  "reason": ""\n'
+                "}\n"
+                "[记录类型]: {record_type}\n[已存在的旧记忆]: {old_record}\n[新记忆]: {new_record}"
+            )
 
     # ----------------------------
     # Internal logging helpers
@@ -196,6 +226,425 @@ class MemoryIngestion:
             return response.data[0].embedding
         except Exception as e:
             raise IngestionError(f"Failed to generate embedding: {e}") from e
+
+    # ----------------------------
+    # LLM Judge prompt (from template)
+    # ----------------------------
+    def _judge_prompt(
+        self,
+        old_record: dict[str, Any],
+        new_record: dict[str, Any],
+        record_type: str,
+        similarity: float | None = None,
+    ) -> str:
+        # Use default=str to serialize datetime and other non-JSON types safely
+        return self.judge_decision_prompt.format(
+            record_type=record_type,
+            similarity=f"{similarity:.3f}" if similarity is not None else "unknown",
+            old_record=json.dumps(old_record, ensure_ascii=False, default=str),
+            new_record=json.dumps(new_record, ensure_ascii=False, default=str),
+        )
+
+    def _call_llm_judge(
+        self,
+        old_record: dict[str, Any],
+        new_record: dict[str, Any],
+        record_type: str,
+        similarity: float | None = None,
+    ) -> dict[str, Any]:
+        # Always create a judge dir and persist inputs to aid debugging
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        base_prompt_dir = Path(
+            getattr(self.config, "prompt_log_dir", "./memory_system/logs/prompts")
+        )
+        judge_dir = base_prompt_dir / f"judge_{ts}"
+        client = None
+        try:
+            client = self.config.get_experience_llm_client()
+            prompt = self._judge_prompt(old_record, new_record, record_type, similarity)
+            self._write_text_file(judge_dir / "input_prompt.txt", prompt)
+
+            response = client.chat.completions.create(
+                model=self.config.experience_llm_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是一个严谨的记忆库维护者，只输出严格JSON。",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+            )
+            result = response.choices[0].message.content or "{}"
+            self._write_text_file(judge_dir / "model_output.json", result)
+            try:
+                # Be robust to Markdown code fences (``` or ```json)
+                text = result.strip()
+                if text.startswith("```"):
+                    # remove first fence line
+                    first_nl = text.find("\n")
+                    if first_nl != -1:
+                        text = text[first_nl + 1 :]
+                    # remove trailing fence line if present
+                    if text.endswith("```"):
+                        text = text[:-3]
+                payload = json.loads(text)
+            except Exception as je:
+                # Persist raw and error
+                self._write_text_file(
+                    judge_dir / "model_error.txt", f"JSON parse error: {je}\n{result}"
+                )
+                raise
+            if isinstance(payload, dict):
+                payload["log_dir"] = str(judge_dir)
+            return payload
+        except Exception as e:
+            # Persist failure details to judge dir
+            self._write_text_file(
+                judge_dir / "model_error.txt",
+                f"Judge failed: {e}\nrecord_type={record_type} similarity={similarity}\nclient={'ok' if client else 'none'}",
+            )
+            self.logger.warning(f"LLM judge failed, degrade to add_new: {e}")
+            return {
+                "decision": "add_new",
+                "target_id": None,
+                "updated_record": None,
+                "reason": "fallback",
+                "log_dir": str(judge_dir),
+            }
+
+    def _cosine_similarity_from_distance(self, distance: float | None) -> float:
+        if distance is None:
+            return 0.0
+        # Chroma returns distance; treat similarity ~= 1 - distance for cosine metric
+        try:
+            return max(0.0, min(1.0, 1.0 - float(distance)))
+        except Exception:
+            return 0.0
+
+    def _top1_similarity_experience(
+        self, embedding: list[float]
+    ) -> tuple[str | None, float]:
+        try:
+            res = self.storage.query_experiences(
+                query_embeddings=[embedding], n_results=1
+            )
+            ids = res.get("ids", [[]])[0] if res else []
+            distances = res.get("distances", [[]])[0] if res else []
+            top_id = ids[0] if ids else None
+            sim = self._cosine_similarity_from_distance(
+                distances[0] if distances else None
+            )
+            return top_id, sim
+        except Exception:
+            return None, 0.0
+
+    def _top1_similarity_fact(self, embedding: list[float]) -> tuple[str | None, float]:
+        try:
+            res = self.storage.query_facts(query_embeddings=[embedding], n_results=1)
+            ids = res.get("ids", [[]])[0] if res else []
+            distances = res.get("distances", [[]])[0] if res else []
+            top_id = ids[0] if ids else None
+            # If distances missing or empty, try to infer similarity via cosine from returned embeddings
+            if distances and len(distances) > 0:
+                sim = self._cosine_similarity_from_distance(distances[0])
+            else:
+                sim = 0.0
+            return top_id, sim
+        except Exception:
+            return None, 0.0
+
+    # ---------------------------------
+    # Public upsert with similarity policy
+    # ---------------------------------
+    def upsert_experience_with_policy(
+        self, experience: ExperienceRecord
+    ) -> dict[str, Any]:
+        """Insert or route to judge based on top-1 similarity and return debug info.
+
+        Returns a dict with keys: result, similarity, threshold, invoked_judge,
+        judge_decision, top_id, fingerprint_discarded.
+        """
+        try:
+            # 1) fingerprint dedupe (output)
+            out_fp = self.storage.compute_experience_output_fp(experience)
+            if self.storage.experience_exists_by_output_fp(out_fp):
+                return {
+                    "result": "discarded_by_fingerprint",
+                    "similarity": 0.0,
+                    "threshold": getattr(
+                        self.config, "similarity_threshold_judge", 0.90
+                    ),
+                    "invoked_judge": False,
+                    "judge_decision": None,
+                    "top_id": None,
+                    "fingerprint_discarded": True,
+                }
+
+            # 2) embedding + top1 similarity
+            embedding = self._generate_embedding(experience.task_description)
+            top_id, sim = self._top1_similarity_experience(embedding)
+            threshold = getattr(self.config, "similarity_threshold_judge", 0.90)
+
+            # 3) routing
+            if top_id is None or sim < threshold:
+                self.storage.add_experiences(
+                    [experience], [embedding], output_fps=[out_fp]
+                )
+                return {
+                    "result": "added_new",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": False,
+                    "judge_decision": None,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                }
+
+            # 4) judge on high similarity
+            # build minimal comparable dicts
+            new_rec = experience.model_dump()
+            # fetch old record content
+            old = (
+                self.storage.experiential_collection.get(
+                    ids=[top_id], include=["documents", "metadatas"]
+                )
+                or {}
+            )
+            old_doc = (old.get("documents") or [""])[0]
+            old_meta = (old.get("metadatas") or [{}])[0] or {}
+            old_rec = {"task_description": old_doc, **old_meta}
+
+            judge = self._call_llm_judge(
+                old_rec, new_rec, record_type="experience", similarity=sim
+            )
+            decision = judge.get("decision", "add_new")
+            judge_log_dir = judge.get("log_dir")
+
+            if decision == "add_new":
+                self.storage.add_experiences(
+                    [experience], [embedding], output_fps=[out_fp]
+                )
+                return {
+                    "result": "added_new",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": True,
+                    "judge_decision": decision,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                    "judge_log_dir": judge_log_dir,
+                }
+            if decision == "update_existing":
+                updated_payload = judge.get("updated_record") or {}
+                try:
+                    updated = ExperienceRecord(**updated_payload)
+                except Exception as e:
+                    self.logger.warning(
+                        f"Invalid updated_record from judge, fallback add_new: {e}"
+                    )
+                    self.storage.add_experiences(
+                        [experience], [embedding], output_fps=[out_fp]
+                    )
+                    return {
+                        "result": "added_new",
+                        "similarity": sim,
+                        "threshold": threshold,
+                        "invoked_judge": True,
+                        "judge_decision": "add_new",
+                        "top_id": top_id,
+                        "fingerprint_discarded": False,
+                        "judge_log_dir": judge.get("log_dir"),
+                    }
+                # recompute embedding using updated description
+                upd_emb = self._generate_embedding(updated.task_description)
+                self.storage.update_experience(top_id, updated, embedding=upd_emb)
+                return {
+                    "result": "updated_existing",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": True,
+                    "judge_decision": decision,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                    "judge_log_dir": judge_log_dir,
+                }
+            if decision == "keep_new_delete_old":
+                self.storage.add_experiences(
+                    [experience], [embedding], output_fps=[out_fp]
+                )
+                self.storage.delete_records(
+                    self.storage.config.experiential_collection_name, [top_id]
+                )
+                return {
+                    "result": "kept_new_deleted_old",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": True,
+                    "judge_decision": decision,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                    "judge_log_dir": judge_log_dir,
+                }
+            if decision == "keep_old_delete_new":
+                return {
+                    "result": "kept_old_discarded_new",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": True,
+                    "judge_decision": decision,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                    "judge_log_dir": judge_log_dir,
+                }
+
+            # default fallback
+            self.storage.add_experiences([experience], [embedding], output_fps=[out_fp])
+            return {
+                "result": "added_new",
+                "similarity": sim,
+                "threshold": threshold,
+                "invoked_judge": True,
+                "judge_decision": decision,
+                "top_id": top_id,
+                "fingerprint_discarded": False,
+                "judge_log_dir": judge_log_dir,
+            }
+        except Exception as e:
+            raise IngestionError(f"Upsert experience with policy failed: {e}") from e
+
+    def upsert_fact_with_policy(self, fact: FactRecord) -> dict[str, Any]:
+        try:
+            out_fp = self.storage.compute_fact_output_fp(fact)
+            if self.storage.fact_exists_by_output_fp(out_fp):
+                return {
+                    "result": "discarded_by_fingerprint",
+                    "similarity": 0.0,
+                    "threshold": getattr(
+                        self.config, "similarity_threshold_judge", 0.90
+                    ),
+                    "invoked_judge": False,
+                    "judge_decision": None,
+                    "top_id": None,
+                    "fingerprint_discarded": True,
+                }
+
+            embedding = self._generate_embedding(fact.content)
+            top_id, sim = self._top1_similarity_fact(embedding)
+            threshold = getattr(self.config, "similarity_threshold_judge", 0.90)
+
+            if top_id is None or sim < threshold:
+                self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
+                return {
+                    "result": "added_new",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": False,
+                    "judge_decision": None,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                }
+
+            new_rec = fact.model_dump()
+            old = (
+                self.storage.declarative_collection.get(
+                    ids=[top_id], include=["documents", "metadatas"]
+                )
+                or {}
+            )
+            old_doc = (old.get("documents") or [""])[0]
+            old_meta = (old.get("metadatas") or [{}])[0] or {}
+            old_rec = {"content": old_doc, **old_meta}
+
+            judge = self._call_llm_judge(
+                old_rec, new_rec, record_type="fact", similarity=sim
+            )
+            decision = judge.get("decision", "add_new")
+            judge_log_dir = judge.get("log_dir")
+
+            if decision == "add_new":
+                self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
+                return {
+                    "result": "added_new",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": True,
+                    "judge_decision": decision,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                    "judge_log_dir": judge_log_dir,
+                }
+            if decision == "update_existing":
+                updated_payload = judge.get("updated_record") or {}
+                try:
+                    updated = FactRecord(**updated_payload)
+                except Exception as e:
+                    self.logger.warning(
+                        f"Invalid updated_record from judge, fallback add_new: {e}"
+                    )
+                    self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
+                    return {
+                        "result": "added_new",
+                        "similarity": sim,
+                        "threshold": threshold,
+                        "invoked_judge": True,
+                        "judge_decision": "add_new",
+                        "top_id": top_id,
+                        "fingerprint_discarded": False,
+                        "judge_log_dir": judge.get("log_dir"),
+                    }
+                upd_emb = self._generate_embedding(updated.content)
+                self.storage.update_fact(top_id, updated, embedding=upd_emb)
+                return {
+                    "result": "updated_existing",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": True,
+                    "judge_decision": decision,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                    "judge_log_dir": judge_log_dir,
+                }
+            if decision == "keep_new_delete_old":
+                self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
+                self.storage.delete_records(
+                    self.storage.config.declarative_collection_name, [top_id]
+                )
+                return {
+                    "result": "kept_new_deleted_old",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": True,
+                    "judge_decision": decision,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                    "judge_log_dir": judge_log_dir,
+                }
+            if decision == "keep_old_delete_new":
+                return {
+                    "result": "kept_old_discarded_new",
+                    "similarity": sim,
+                    "threshold": threshold,
+                    "invoked_judge": True,
+                    "judge_decision": decision,
+                    "top_id": top_id,
+                    "fingerprint_discarded": False,
+                    "judge_log_dir": judge_log_dir,
+                }
+
+            self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
+            return {
+                "result": "added_new",
+                "similarity": sim,
+                "threshold": threshold,
+                "invoked_judge": True,
+                "judge_decision": decision,
+                "top_id": top_id,
+                "fingerprint_discarded": False,
+                "judge_log_dir": judge_log_dir,
+            }
+        except Exception as e:
+            raise IngestionError(f"Upsert fact with policy failed: {e}") from e
 
     def _extract_keywords_with_jieba(self, text: str) -> list[str]:
         """

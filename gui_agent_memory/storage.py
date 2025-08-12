@@ -226,7 +226,13 @@ class MemoryStorage:
         return self._compute_fact_output_fp(fact)
 
     def _sanitize_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
-        """Normalize metadata values for ChromaDB storage."""
+        """Normalize metadata values for ChromaDB storage.
+
+        Rules:
+        - Convert supported complex types to primitives
+        - Drop keys with None values (ChromaDB metadata does not accept None)
+        - Keep only primitive types supported by Chroma: str, int, float, bool
+        """
         # last_used_at: ensure ISO string
         if "last_used_at" in metadata and metadata["last_used_at"] is not None:
             value = metadata["last_used_at"]
@@ -242,11 +248,11 @@ class MemoryStorage:
         if "keywords" in metadata and isinstance(metadata["keywords"], list):
             metadata["keywords"] = ",".join([str(k) for k in metadata["keywords"]])
 
-        # Filter to Chroma-supported primitive types
+        # Filter to Chroma-supported primitive types and drop None values
         clean_metadata: dict[str, Any] = {
             k: v
             for k, v in metadata.items()
-            if isinstance(v, str | int | float | bool) or v is None
+            if v is not None and isinstance(v, str | int | float | bool)
         }
         return clean_metadata
 
@@ -269,9 +275,11 @@ class MemoryStorage:
         except Exception:
             metadata["action_flow"] = "[]"
 
-        # Attach fingerprints consistently; use None when not provided
-        metadata["output_fp"] = output_fp if output_fp else None
-        metadata["input_fp"] = input_fp if input_fp else None
+        # Attach fingerprints only when provided (avoid None values)
+        if output_fp is not None:
+            metadata["output_fp"] = output_fp
+        if input_fp is not None:
+            metadata["input_fp"] = input_fp
 
         # Sanitize types
         clean_metadata = self._sanitize_metadata(metadata)
@@ -285,9 +293,9 @@ class MemoryStorage:
         record_id = f"fact_{uuid.uuid4().hex}"
         document = fact.content
         metadata = fact.model_dump(exclude={"content"})
-        # Attach fingerprints consistently; input_fp may be filled later in add_facts
-        metadata["output_fp"] = output_fp if output_fp else None
-        metadata["input_fp"] = None
+        # Attach fingerprints only when provided (avoid None values)
+        if output_fp is not None:
+            metadata["output_fp"] = output_fp
         clean_metadata = self._sanitize_metadata(metadata)
         return record_id, document, clean_metadata
 
@@ -490,6 +498,7 @@ class MemoryStorage:
                 query_texts=query_texts,
                 where=where,
                 n_results=n_results,
+                include=["distances", "embeddings"],
             )
             return cast(dict[str, list[Any]], result)
         except Exception as e:
@@ -523,6 +532,7 @@ class MemoryStorage:
                 query_texts=query_texts,
                 where=where,
                 n_results=n_results,
+                include=["distances", "embeddings"],
             )
             return cast(dict[str, list[Any]], result)
         except Exception as e:
@@ -590,6 +600,96 @@ class MemoryStorage:
             self._init_collections()
         except Exception as e:
             raise StorageError(f"Failed to clear collections in ChromaDB: {e}") from e
+
+    # -----------------------------
+    # Update / Delete (atomic ops)
+    # -----------------------------
+    def update_experience(
+        self,
+        record_id: str,
+        updated: ExperienceRecord,
+        embedding: list[float],
+    ) -> None:
+        """Overwrite an existing experience by id.
+
+        - Preserves usage_count/last_used_at in metadata
+        - Recomputes output_fp and stores provided embedding (if any)
+        """
+        try:
+            # fetch current metadata to preserve usage stats
+            current = (
+                self.experiential_collection.get(ids=[record_id], include=["metadatas"])
+                or {}
+            )
+            current_metas = current.get("metadatas") or []
+            base_meta_src = current_metas[0] if current_metas else {}
+            base_meta = dict(base_meta_src) if isinstance(base_meta_src, dict) else {}
+
+            out_fp = self._compute_experience_output_fp(updated)
+            rid, doc, meta = self._prepare_experience_record(updated, output_fp=out_fp)
+            # preserve usage stats
+            for k in ("usage_count", "last_used_at"):
+                if k in base_meta and base_meta[k] is not None:
+                    meta[k] = base_meta[k]
+
+            self.experiential_collection.update(
+                ids=[record_id],
+                documents=[doc],
+                metadatas=[meta],
+                embeddings=[embedding],
+            )
+        except Exception as e:
+            raise StorageError(f"Failed to update experience {record_id}: {e}") from e
+
+    def update_fact(
+        self,
+        record_id: str,
+        updated: FactRecord,
+        embedding: list[float],
+    ) -> None:
+        """Overwrite an existing fact by id.
+
+        - Preserves usage_count/last_used_at in metadata
+        - Recomputes output_fp and stores provided embedding (if any)
+        """
+        try:
+            current = (
+                self.declarative_collection.get(ids=[record_id], include=["metadatas"])
+                or {}
+            )
+            current_metas = current.get("metadatas") or []
+            base_meta_src = current_metas[0] if current_metas else {}
+            base_meta = dict(base_meta_src) if isinstance(base_meta_src, dict) else {}
+
+            out_fp = self._compute_fact_output_fp(updated)
+            # prepare returns a new id for facts, but we must keep original id
+            _rid, doc, meta = self._prepare_fact_record(
+                updated, index=0, output_fp=out_fp
+            )
+            # reset id-bound fields
+            meta["input_fp"] = meta.get("input_fp", None)
+            for k in ("usage_count", "last_used_at"):
+                if k in base_meta and base_meta[k] is not None:
+                    meta[k] = base_meta[k]
+
+            self.declarative_collection.update(
+                ids=[record_id],
+                documents=[doc],
+                metadatas=[meta],
+                embeddings=[embedding],
+            )
+        except Exception as e:
+            raise StorageError(f"Failed to update fact {record_id}: {e}") from e
+
+    def delete_records(self, collection_name: str, ids: list[str]) -> None:
+        """Hard delete records by ids from a collection."""
+        try:
+            collection = self.get_collection(collection_name)
+            collection.delete(ids=ids)
+        except Exception as e:
+            raise StorageError(
+                f"Failed to delete records {ids} from {collection_name}: {e}"
+            ) from e
 
     def update_usage_stats(
         self, record_ids: list[str] | str, collection_name: str | list[str]
