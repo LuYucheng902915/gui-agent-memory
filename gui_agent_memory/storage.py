@@ -8,7 +8,9 @@ This module handles:
 - Collection-specific operations for both memory types
 """
 
+import hashlib
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Any, cast
@@ -18,7 +20,7 @@ from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 
 from .config import MemoryConfig, get_config
-from .models import ExperienceRecord, FactRecord
+from .models import ActionStep, ExperienceRecord, FactRecord
 
 # Note: SQLite compatibility shim is handled once in gui_agent_memory/__init__.py
 
@@ -43,6 +45,7 @@ class MemoryStorage:
             config: Optional injected configuration (used in tests)
         """
         self.config = config or get_config()
+        self.logger = logging.getLogger(__name__)
         self._init_chromadb()
         self._init_collections()
 
@@ -88,6 +91,140 @@ class MemoryStorage:
     # ---------------------------------
     # Internal helpers (DRY utilities)
     # ---------------------------------
+    def _normalize_text(self, text: str) -> str:
+        """Normalize text: trim and collapse internal whitespace."""
+        if text is None:
+            return ""
+        return " ".join(str(text).strip().split())
+
+    def _normalize_keywords(self, keywords: list[str] | None) -> list[str]:
+        """Normalize keywords: lower, trim, de-duplicate, sort for stability."""
+        if not keywords:
+            return []
+        normalized = {
+            self._normalize_text(k).lower() for k in keywords if str(k).strip()
+        }
+        return sorted(normalized)
+
+    def compute_experience_input_fp(
+        self,
+        raw_history: list[dict[str, Any]],
+        app_name: str,
+        task_description: str,
+        is_successful: bool,
+    ) -> str:
+        """Compute input fingerprint for experiences using stable normalization."""
+        try:
+            history_norm = json.dumps(
+                raw_history, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        except Exception:
+            history_norm = json.dumps(
+                [], ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        payload = {
+            "fp_v": 1,
+            "type": "experience_input",
+            "history": history_norm,
+            "app": self._normalize_text(app_name).lower(),
+            "task": self._normalize_text(task_description),
+            "ok": bool(is_successful),
+        }
+        data = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+    def _experience_flow_signature(
+        self, steps: list[ActionStep]
+    ) -> list[dict[str, str]]:
+        """Create a stable signature of action_flow ignoring 'thought'."""
+        signature: list[dict[str, str]] = []
+        for step in steps:
+            signature.append(
+                {
+                    "a": self._normalize_text(step.action).lower(),
+                    "t": self._normalize_text(step.target_element_description),
+                }
+            )
+        return signature
+
+    def _compute_experience_output_fp(self, experience: ExperienceRecord) -> str:
+        """Compute SHA-256 over normalized, structured experience output."""
+        payload = {
+            "fp_v": 1,
+            "type": "experience_output",
+            "task": self._normalize_text(experience.task_description),
+            "pre": self._normalize_text(experience.preconditions),
+            "kw": self._normalize_keywords(experience.keywords),
+            "flow": self._experience_flow_signature(experience.action_flow),
+        }
+        data = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+    def _compute_fact_output_fp(self, fact: FactRecord) -> str:
+        """Compute SHA-256 over normalized fact content only (robust to keyword variance)."""
+        payload = {
+            "fp_v": 1,
+            "type": "fact_output",
+            "content": self._normalize_text(fact.content),
+        }
+        data = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+    def _compute_fact_input_fp(self, content: str, keywords: list[str] | None) -> str:
+        """Compute input fingerprint for facts (same normalization strategy)."""
+        payload = {
+            "fp_v": 1,
+            "type": "fact_input",
+            "content": self._normalize_text(content),
+            "kw": self._normalize_keywords(keywords),
+        }
+        data = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+    def _exists_by_fp(
+        self, collection: chromadb.Collection, fp_field: str, fp_value: str
+    ) -> bool:
+        """Check existence by metadata fingerprint using a where filter."""
+        try:
+            # Use get with where-only filter (no include parameter) to fetch ids
+            result = collection.get(where={fp_field: fp_value}, limit=1)
+            if isinstance(result, dict):
+                ids = result.get("ids") or []
+                return bool(ids)
+            return False
+        except Exception as exc:
+            self.logger.warning("Fingerprint existence check failed: %s", exc)
+            return False
+
+    # Public helpers for ingestion pre-checks
+    def experience_exists_by_input_fp(self, fp_value: str) -> bool:
+        return self._exists_by_fp(self.experiential_collection, "input_fp", fp_value)
+
+    def fact_exists_by_input_fp(self, fp_value: str) -> bool:
+        return self._exists_by_fp(self.declarative_collection, "input_fp", fp_value)
+
+    # Public helpers: output-fingerprint existence checks (explicit pre-checks)
+    def experience_exists_by_output_fp(self, fp_value: str) -> bool:
+        return self._exists_by_fp(self.experiential_collection, "output_fp", fp_value)
+
+    def fact_exists_by_output_fp(self, fp_value: str) -> bool:
+        return self._exists_by_fp(self.declarative_collection, "output_fp", fp_value)
+
+    # Public helpers: expose FP computation for ingestion-layer consistency
+    def compute_experience_output_fp(self, experience: ExperienceRecord) -> str:
+        return self._compute_experience_output_fp(experience)
+
+    def compute_fact_output_fp(self, fact: FactRecord) -> str:
+        return self._compute_fact_output_fp(fact)
+
     def _sanitize_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
         """Normalize metadata values for ChromaDB storage."""
         # last_used_at: ensure ISO string
@@ -114,7 +251,10 @@ class MemoryStorage:
         return clean_metadata
 
     def _prepare_experience_record(
-        self, experience: ExperienceRecord
+        self,
+        experience: ExperienceRecord,
+        input_fp: str | None = None,
+        output_fp: str | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         """Convert an ExperienceRecord into (id, document, metadata)."""
         record_id = experience.source_task_id
@@ -129,18 +269,25 @@ class MemoryStorage:
         except Exception:
             metadata["action_flow"] = "[]"
 
+        # Attach fingerprints consistently; use None when not provided
+        metadata["output_fp"] = output_fp if output_fp else None
+        metadata["input_fp"] = input_fp if input_fp else None
+
         # Sanitize types
         clean_metadata = self._sanitize_metadata(metadata)
         return record_id, document, clean_metadata
 
     def _prepare_fact_record(
-        self, fact: FactRecord, index: int
+        self, fact: FactRecord, index: int, output_fp: str | None = None
     ) -> tuple[str, str, dict[str, Any]]:
         """Convert a FactRecord into (id, document, metadata) preserving current ID scheme."""
         # Use UUIDv4 for robust, globally unique IDs
         record_id = f"fact_{uuid.uuid4().hex}"
         document = fact.content
         metadata = fact.model_dump(exclude={"content"})
+        # Attach fingerprints consistently; input_fp may be filled later in add_facts
+        metadata["output_fp"] = output_fp if output_fp else None
+        metadata["input_fp"] = None
         clean_metadata = self._sanitize_metadata(metadata)
         return record_id, document, clean_metadata
 
@@ -171,7 +318,11 @@ class MemoryStorage:
             ) from e
 
     def add_experiences(
-        self, experiences: list[ExperienceRecord], embeddings: list[list[float]]
+        self,
+        experiences: list[ExperienceRecord],
+        embeddings: list[list[float]],
+        input_fps: list[str | None] | None = None,
+        output_fps: list[str | None] | None = None,
     ) -> list[str]:
         """
         Add experience records to the experiential memories collection.
@@ -197,20 +348,38 @@ class MemoryStorage:
             ids: list[str] = []
             documents: list[str] = []
             metadatas: list[dict[str, Any]] = []
+            final_embeddings: list[list[float]] = []
 
-            for experience in experiences:
+            for idx, experience in enumerate(experiences):
+                out_fp = (
+                    output_fps[idx]
+                    if output_fps and idx < len(output_fps)
+                    else self._compute_experience_output_fp(experience)
+                )
+                # Dedupe by output fingerprint before adding
+                if self._exists_by_fp(
+                    self.experiential_collection, "output_fp", out_fp
+                ):
+                    continue
+
+                in_fp = input_fps[idx] if input_fps and idx < len(input_fps) else None
                 record_id, document, metadata = self._prepare_experience_record(
-                    experience
+                    experience, input_fp=in_fp, output_fp=out_fp
                 )
                 ids.append(record_id)
                 documents.append(document)
                 metadatas.append(metadata)
+                # Keep embeddings aligned with items being added
+                final_embeddings.append(embeddings[idx])
+
+            if not ids:
+                return []
 
             self.experiential_collection.add(
                 ids=ids,
                 documents=documents,
                 metadatas=metadatas,
-                embeddings=embeddings,
+                embeddings=final_embeddings,
             )
 
             return ids
@@ -219,7 +388,11 @@ class MemoryStorage:
             raise StorageError(f"Failed to add experiences to ChromaDB: {e}") from e
 
     def add_facts(
-        self, facts: list[FactRecord], embeddings: list[list[float]]
+        self,
+        facts: list[FactRecord],
+        embeddings: list[list[float]],
+        input_fps: list[str | None] | None = None,
+        output_fps: list[str | None] | None = None,
     ) -> list[str]:
         """
         Add fact records to the declarative memories collection.
@@ -245,18 +418,43 @@ class MemoryStorage:
             ids: list[str] = []
             documents: list[str] = []
             metadatas: list[dict[str, Any]] = []
+            final_embeddings: list[list[float]] = []
 
             for i, fact in enumerate(facts):
-                record_id, document, metadata = self._prepare_fact_record(fact, i)
+                out_fp = (
+                    output_fps[i]
+                    if output_fps and i < len(output_fps)
+                    else self._compute_fact_output_fp(fact)
+                )
+                # Dedupe by output fingerprint before adding
+                if self._exists_by_fp(self.declarative_collection, "output_fp", out_fp):
+                    continue
+
+                in_fp = input_fps[i] if input_fps and i < len(input_fps) else None
+                if in_fp and self._exists_by_fp(
+                    self.declarative_collection, "input_fp", in_fp
+                ):
+                    continue
+
+                record_id, document, metadata = self._prepare_fact_record(
+                    fact, i, output_fp=out_fp
+                )
+                # Ensure input_fp presence for consistency in metadata
+                if in_fp:
+                    metadata["input_fp"] = in_fp
                 ids.append(record_id)
                 documents.append(document)
                 metadatas.append(metadata)
+                final_embeddings.append(embeddings[i])
+
+            if not ids:
+                return []
 
             self.declarative_collection.add(
                 ids=ids,
                 documents=documents,
                 metadatas=metadatas,
-                embeddings=embeddings,
+                embeddings=final_embeddings,
             )
 
             return ids

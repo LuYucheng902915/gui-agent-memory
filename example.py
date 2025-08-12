@@ -80,12 +80,19 @@ def demonstrate_fact_management(memory: MemorySystem):
     # 1. 添加单个事实
     print_subsection("添加单个事实")
     try:
-        fact_id = memory.add_fact(
+        fact_result = memory.add_fact(
             content="VS Code是Microsoft开发的免费源代码编辑器，支持多种编程语言和扩展",
             keywords=["VS Code", "Microsoft", "编辑器", "编程"],
             source="demo_knowledge_base",
         )
-        print(f"✅ 成功添加事实，ID: {fact_id}")
+        if isinstance(fact_result, str) and "already exists" in fact_result.lower():
+            print(f"🔁 事实已存在，跳过: {fact_result}")
+        elif isinstance(fact_result, str) and (
+            fact_result.startswith("Successfully added fact") or "成功" in fact_result
+        ):
+            print(f"✅ 成功添加事实: {fact_result}")
+        else:
+            print(f"ℹ️ 添加事实结果: {fact_result}")
     except Exception as e:
         print(f"❌ 添加事实失败: {e}")
 
@@ -115,10 +122,16 @@ def demonstrate_fact_management(memory: MemorySystem):
     ]
 
     try:
-        batch_ids = memory.batch_add_facts(facts_data)
-        print(f"✅ 成功批量添加 {len(batch_ids)} 个事实")
-        for i, fact_id in enumerate(batch_ids):
-            print(f"   {i + 1}. {fact_id}")
+        batch_results = memory.batch_add_facts(facts_data)
+        successes = [
+            r
+            for r in batch_results
+            if isinstance(r, str) and r.startswith("Successfully added fact")
+        ]
+        duplicates = len(batch_results) - len(successes)
+        print(f"✅ 批量处理完成: 新增 {len(successes)} 条, 去重 {duplicates} 条")
+        for i, res in enumerate(batch_results):
+            print(f"   {i + 1}. {res}")
     except Exception as e:
         print(f"❌ 批量添加事实失败: {e}")
 
@@ -268,14 +281,21 @@ def demonstrate_experience_learning(memory: MemorySystem):
     }
 
     try:
-        record_id = memory.learn_from_task(
+        learn_result = memory.learn_from_task(
             raw_history=failure_task["raw_history"],
             is_successful=False,
             source_task_id=failure_task["task_id"],
             app_name=failure_task["app_name"],
             task_description=failure_task["description"],
         )
-        print(f"✅ 失败经验学习成功: {record_id}")
+        if isinstance(learn_result, str) and "already exists" in learn_result.lower():
+            print(f"🔁 失败经验重复，跳过: {learn_result}")
+        elif isinstance(learn_result, str) and (
+            learn_result.startswith("Successfully") or "成功" in learn_result
+        ):
+            print(f"✅ 失败经验学习成功: {learn_result}")
+        else:
+            print(f"ℹ️ 学习失败经验结果: {learn_result}")
     except Exception as e:
         print(f"❌ 学习失败经验失败: {e}")
 
@@ -397,7 +417,10 @@ def demonstrate_performance_scenarios(memory: MemorySystem):
         batch_ids = memory.batch_add_facts(large_fact_batch)
         batch_time = time.time() - start_time
         print(f"✅ 批量添加 {len(batch_ids)} 个事实耗时: {batch_time:.3f}s")
-        print(f"   平均每个事实: {batch_time / len(batch_ids):.3f}s")
+        if len(batch_ids) > 0:
+            print(f"   平均每个事实: {batch_time / len(batch_ids):.3f}s")
+        else:
+            print("   ℹ️ 本次批量均被去重，未新增记录")
     except Exception as e:
         print(f"❌ 批量添加性能测试失败: {e}")
 
