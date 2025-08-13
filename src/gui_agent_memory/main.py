@@ -5,6 +5,7 @@ This module provides the high-level API for interacting with the memory system,
 including retrieval, learning, and knowledge management operations.
 """
 
+import logging
 from typing import Any
 
 from .config import ConfigurationError, get_config
@@ -57,7 +58,21 @@ class MemorySystem:
             # Initialize core components with DI-friendly constructors
             self.storage = storage or MemoryStorage(self.config)
             self.ingestion = ingestion or MemoryIngestion(self.storage, self.config)
-            self.retriever = retriever or MemoryRetriever(None, self.config)
+            self.retriever = retriever or MemoryRetriever(self.storage, self.config)
+
+            # Configure module logging once (root logger), if not already configured
+            root_logger = logging.getLogger()
+            if not root_logger.handlers:
+                # Map LogLevel enum to logging module level
+                level_name = str(getattr(self.config, "log_level", "INFO"))
+                level = getattr(logging, level_name, logging.INFO)
+                root_logger.setLevel(level)
+                handler = logging.StreamHandler()
+                formatter = logging.Formatter(
+                    "%(asctime)s %(levelname)s %(name)s: %(message)s"
+                )
+                handler.setFormatter(formatter)
+                root_logger.addHandler(handler)
 
         except ConfigurationError:
             raise  # Re-raise configuration errors directly
@@ -475,6 +490,17 @@ class MemorySystem:
         try:
             storage_stats = self.storage.get_collection_stats()
 
+            # Resolve package version from package metadata; fallback to __version__
+            try:
+                from importlib.metadata import version as _pkg_version
+
+                pkg_version = _pkg_version("gui-agent-memory")
+            except Exception:
+                try:
+                    from . import __version__ as pkg_version
+                except Exception:
+                    pkg_version = "unknown"
+
             return {
                 "storage": storage_stats,
                 "configuration": {
@@ -483,7 +509,7 @@ class MemorySystem:
                     "experience_llm_model": self.config.experience_llm_model,
                     "chroma_db_path": self.config.chroma_db_path,
                 },
-                "version": "1.0.0",
+                "version": pkg_version,
             }
         except StorageError as e:
             raise MemorySystemError(f"Getting system stats failed: {e}") from e

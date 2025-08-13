@@ -338,6 +338,7 @@ class MemoryConfig(BaseSettings):
             "embedding_dimension": self.embedding_dimension,
             "similarity_threshold_judge": self.similarity_threshold_judge,
             "logs_base_dir": str(self.logs_base_dir),
+            "operation_logs_enabled": self.operation_logs_enabled,
             "log_enabled": self.log_enabled,
             "log_level": self.log_level,
             "chroma_anonymized_telemetry": self.chroma_anonymized_telemetry,

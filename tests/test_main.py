@@ -780,7 +780,7 @@ class TestMemorySystemAdditionalMethods:
                 "experience_llm_model": "test-llm-model",
                 "chroma_db_path": "/test/path",
             },
-            "version": "1.0.0",
+            "version": "0.1.0",
         }
 
         assert result == expected

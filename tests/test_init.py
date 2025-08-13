@@ -14,7 +14,7 @@ class TestInitModule:
 
     def test_module_metadata(self):
         """Test that module metadata is correctly defined."""
-        assert gui_agent_memory.__version__ == "1.0.0"
+        assert gui_agent_memory.__version__ == "0.1.0"
         assert gui_agent_memory.__author__ == "GUI Agent Team"
 
     def test_public_api_exports(self):

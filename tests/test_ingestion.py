@@ -221,9 +221,10 @@ class TestMemoryIngestion:
         ]
 
     def test_prompt_template_loading_success(self, mock_config, mock_storage):
-        """Test successful loading of prompt templates."""
+        """Test successful loading of prompt templates (three files)."""
         experience_prompt = "Experience distillation prompt: {raw_history}"
         keyword_prompt = "Keyword extraction prompt: {text}"
+        judge_prompt = '{"decision":"add_new","target_id":null,"updated_record":null,"reason":"ok"}'
 
         with (
             patch("gui_agent_memory.ingestion.get_config", return_value=mock_config),
@@ -233,41 +234,18 @@ class TestMemoryIngestion:
             ),
             patch("pathlib.Path.read_text") as mock_read_text,
         ):
-            mock_read_text.side_effect = [experience_prompt, keyword_prompt]
+            mock_read_text.side_effect = [
+                experience_prompt,
+                keyword_prompt,
+                judge_prompt,
+            ]
             ingestion = MemoryIngestion()
 
             assert ingestion.experience_distillation_prompt == experience_prompt
             assert ingestion.keyword_extraction_prompt == keyword_prompt
+            assert ingestion.judge_decision_prompt == judge_prompt
 
-    def test_prompt_template_loading_ignores_external_dir(
-        self, mock_config, mock_storage, tmp_path
-    ):
-        """External dir in config is ignored; bundled prompts are used."""
-        ext_dir = tmp_path / "prompts"
-        ext_dir.mkdir(parents=True)
-        (ext_dir / "experience_distillation.txt").write_text(
-            "EXT experience: {raw_history}", encoding="utf-8"
-        )
-        (ext_dir / "keyword_extraction.txt").write_text(
-            "EXT keyword: {text}", encoding="utf-8"
-        )
-
-        mock_config.prompt_templates_dir = str(ext_dir)
-
-        with (
-            patch("gui_agent_memory.ingestion.get_config", return_value=mock_config),
-            patch(
-                "gui_agent_memory.ingestion.MemoryStorage", return_value=mock_storage
-            ),
-        ):
-            ingestion = MemoryIngestion()
-
-            assert ingestion.experience_distillation_prompt.strip() != ""
-            assert ingestion.keyword_extraction_prompt.strip() != ""
-            assert not ingestion.experience_distillation_prompt.startswith(
-                "EXT experience"
-            )
-            assert not ingestion.keyword_extraction_prompt.startswith("EXT keyword")
+    # Removed: external prompt directory feature no longer supported; test deleted.
 
     def test_prompt_template_loading_failure(self, mock_config, mock_storage):
         """Test error handling when prompt templates fail to load."""
@@ -1128,3 +1106,230 @@ class TestIngestionCoverage:
             ingestion.add_experience(experience)
 
         assert "Failed to add experience" in str(exc_info.value)
+
+
+class TestUpsertPolicy:
+    """Additional coverage for upsert_fact_with_policy branches."""
+
+    @pytest.fixture
+    def mock_storage(self):
+        storage = Mock()
+        storage.add_facts.return_value = ["fact_id"]
+        storage.update_fact = Mock()
+        return storage
+
+    @pytest.fixture
+    def ingestion(self, mock_config, mock_storage):
+        with (
+            patch("gui_agent_memory.ingestion.get_config", return_value=mock_config),
+            patch(
+                "gui_agent_memory.ingestion.MemoryStorage", return_value=mock_storage
+            ),
+        ):
+            return MemoryIngestion()
+
+    def test_discard_by_fingerprint(self, ingestion, mock_config):
+        """Existing output_fp should short-circuit to discard before add/judge."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_config.similarity_threshold_judge = 0.8
+        # Use real callables (not Mock) so pre-check path executes before embedding
+        ingestion.storage.compute_fact_output_fp = lambda _fact: "fp_same"
+        ingestion.storage.fact_exists_by_output_fp = lambda _fp: True
+
+        dbg = ingestion.upsert_fact_with_policy(
+            FactRecord(content="dup", keywords=["k"], source="t")
+        )
+
+        assert dbg["result"] == "discarded_by_fingerprint"
+        assert dbg["fingerprint_discarded"] is True
+        ingestion.storage.add_facts.assert_not_called()
+
+    def test_add_below_threshold(self, ingestion, mock_config):
+        """Below threshold → add_new and pass output_fps through to storage."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_config.similarity_threshold_judge = 0.9
+        ingestion.storage.compute_fact_output_fp = Mock(return_value="fp_new")
+        ingestion.storage.fact_exists_by_output_fp = Mock(return_value=False)
+        with patch.object(
+            ingestion, "_generate_embedding", return_value=[0.1, 0.2, 0.3]
+        ):
+            with patch.object(
+                ingestion, "_top1_similarity_fact", return_value=(None, 0.1)
+            ):
+                ingestion.storage.add_facts.return_value = ["fact_123"]
+                dbg = ingestion.upsert_fact_with_policy(
+                    FactRecord(content="new", keywords=["k"], source="t")
+                )
+
+        assert dbg["result"] == "added_new"
+        ingestion.storage.add_facts.assert_called_once()
+        _, kwargs = ingestion.storage.add_facts.call_args
+        assert "output_fps" in kwargs and kwargs["output_fps"][0] == "fp_new"
+
+    def test_judge_add_new_but_fp_recheck_discards(self, ingestion, mock_config):
+        """Above threshold + judge says add_new, but fp safety recheck discards before add."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_config.similarity_threshold_judge = 0.5
+        ingestion.storage.compute_fact_output_fp = lambda _fact: "fp_safe"
+        # Ensure the safety re-check (the first actual exists call) returns True
+        ingestion.storage.fact_exists_by_output_fp = Mock(return_value=True)
+
+        ingestion.storage.declarative_collection = Mock()
+        ingestion.storage.declarative_collection.get.return_value = {
+            "documents": ["old content"],
+            "metadatas": [{"source": "s"}],
+        }
+
+        with (
+            patch.object(ingestion, "_generate_embedding", return_value=[0.1] * 4),
+            patch.object(
+                ingestion, "_top1_similarity_fact", return_value=("old_id", 0.9)
+            ),
+            patch.object(
+                ingestion,
+                "_call_llm_judge",
+                return_value={"decision": "add_new", "reason": "ok"},
+            ),
+        ):
+            dbg = ingestion.upsert_fact_with_policy(
+                FactRecord(content="new", keywords=["k"], source="t")
+            )
+
+        assert dbg["result"] == "discarded_by_fingerprint"
+        ingestion.storage.add_facts.assert_not_called()
+
+    def test_judge_keep_new_delete_old(self, ingestion, mock_config):
+        """Judge decides keep_new_delete_old → add new then delete old."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_config.similarity_threshold_judge = 0.5
+        ingestion.storage.compute_fact_output_fp = lambda _fact: "fp_knew"
+        ingestion.storage.fact_exists_by_output_fp = Mock(return_value=False)
+        ingestion.storage.declarative_collection = Mock()
+        ingestion.storage.declarative_collection.get.return_value = {
+            "documents": ["old content"],
+            "metadatas": [{"source": "s"}],
+        }
+        ingestion.storage.add_facts.return_value = ["new_id"]
+
+        with (
+            patch.object(ingestion, "_generate_embedding", return_value=[0.3] * 4),
+            patch.object(
+                ingestion, "_top1_similarity_fact", return_value=("old_id", 0.96)
+            ),
+            patch.object(
+                ingestion,
+                "_call_llm_judge",
+                return_value={"decision": "keep_new_delete_old", "reason": "swap"},
+            ),
+        ):
+            dbg = ingestion.upsert_fact_with_policy(
+                FactRecord(content="new", keywords=["k"], source="t")
+            )
+
+        assert dbg["result"] == "kept_new_deleted_old"
+        ingestion.storage.add_facts.assert_called_once()
+        ingestion.storage.delete_records.assert_called_once()
+
+    def test_judge_keep_old_delete_new(self, ingestion, mock_config):
+        """Judge decides keep_old_delete_new → discard new, no add."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_config.similarity_threshold_judge = 0.5
+        ingestion.storage.compute_fact_output_fp = lambda _fact: "fp_kold"
+        ingestion.storage.fact_exists_by_output_fp = Mock(return_value=False)
+        ingestion.storage.declarative_collection = Mock()
+        ingestion.storage.declarative_collection.get.return_value = {
+            "documents": ["old content"],
+            "metadatas": [{"source": "s"}],
+        }
+
+        with (
+            patch.object(ingestion, "_generate_embedding", return_value=[0.4] * 4),
+            patch.object(
+                ingestion, "_top1_similarity_fact", return_value=("old_id", 0.97)
+            ),
+            patch.object(
+                ingestion,
+                "_call_llm_judge",
+                return_value={
+                    "decision": "keep_old_delete_new",
+                    "reason": "old better",
+                },
+            ),
+        ):
+            dbg = ingestion.upsert_fact_with_policy(
+                FactRecord(content="new", keywords=["k"], source="t")
+            )
+
+        assert dbg["result"] == "kept_old_discarded_new"
+        ingestion.storage.add_facts.assert_not_called()
+
+    def test_judge_update_existing_invalid_payload_fallback_add_new(
+        self, ingestion, mock_config
+    ):
+        """Invalid updated_record should fallback to add_new path without crashing."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_config.similarity_threshold_judge = 0.5
+        ingestion.storage.compute_fact_output_fp = lambda _fact: "fp_inv"
+        ingestion.storage.fact_exists_by_output_fp = Mock(return_value=False)
+        ingestion.storage.declarative_collection = Mock()
+        ingestion.storage.declarative_collection.get.return_value = {
+            "documents": ["old content"],
+            "metadatas": [{"source": "s"}],
+        }
+
+        with (
+            patch.object(ingestion, "_generate_embedding", return_value=[0.5] * 4),
+            patch.object(
+                ingestion, "_top1_similarity_fact", return_value=("old_id", 0.95)
+            ),
+            patch.object(
+                ingestion,
+                "_call_llm_judge",
+                return_value={"decision": "update_existing", "updated_record": {}},
+            ),
+        ):
+            dbg = ingestion.upsert_fact_with_policy(
+                FactRecord(content="new", keywords=["k"], source="t")
+            )
+
+        assert dbg["result"] == "added_new"
+        ingestion.storage.add_facts.assert_called()
+
+    def test_judge_update_existing(self, ingestion, mock_config):
+        """Judge decides update_existing → call storage.update_fact with new embedding."""
+        from gui_agent_memory.models import FactRecord
+
+        mock_config.similarity_threshold_judge = 0.5
+        ingestion.storage.compute_fact_output_fp = Mock(return_value="fp_u")
+        ingestion.storage.fact_exists_by_output_fp = Mock(return_value=False)
+
+        ingestion.storage.declarative_collection = Mock()
+        ingestion.storage.declarative_collection.get.return_value = {
+            "documents": ["old content"],
+            "metadatas": [{"source": "s"}],
+        }
+
+        updated = {"content": "updated", "keywords": ["a"], "source": "t"}
+        with (
+            patch.object(ingestion, "_generate_embedding", return_value=[0.2] * 4),
+            patch.object(
+                ingestion, "_top1_similarity_fact", return_value=("old_id", 0.95)
+            ),
+            patch.object(
+                ingestion,
+                "_call_llm_judge",
+                return_value={"decision": "update_existing", "updated_record": updated},
+            ),
+        ):
+            dbg = ingestion.upsert_fact_with_policy(
+                FactRecord(content="new", keywords=["k"], source="t")
+            )
+
+        assert dbg["result"] in {"updated_existing", "update_existing", "updated"}
+        ingestion.storage.update_fact.assert_called_once()

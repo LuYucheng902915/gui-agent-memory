@@ -16,7 +16,7 @@ try:
 except ImportError:
     pass
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"
 __author__ = "GUI Agent Team"
 
 from .main import MemorySystem

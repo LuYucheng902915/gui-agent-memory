@@ -48,17 +48,9 @@ class MemoryIngestion:
         """
         self.config = config or get_config()
         self.storage = storage or MemoryStorage(self.config)
-
-        # Setup logging
-        self._setup_logging()
-
+        self.logger = logging.getLogger(__name__)
         # Load prompt templates
         self._load_prompts()
-
-    def _setup_logging(self) -> None:
-        """Setup module logger (no JSONL file handler)."""
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.INFO)
 
     def _load_prompts(self) -> None:
         """Load prompt templates from packaged resources only (robust to patched reads)."""
@@ -71,21 +63,9 @@ class MemoryIngestion:
                 base / "keyword_extraction.txt"
             ).read_text(encoding="utf-8")
             # Judge is optional in some tests; provide robust fallback when read is patched or file absent
-            try:
-                self.judge_decision_prompt = (base / "judge_decision.txt").read_text(
-                    encoding="utf-8"
-                )
-            except Exception:
-                self.judge_decision_prompt = (
-                    "请在 add_new / update_existing / keep_new_delete_old / keep_old_delete_new 中选择其一，"
-                    "只输出严格 JSON：{\n"
-                    '  "decision": "add_new|update_existing|keep_new_delete_old|keep_old_delete_new",\n'
-                    '  "target_id": null,\n'
-                    '  "updated_record": null,\n'
-                    '  "reason": ""\n'
-                    "}\n"
-                    "[记录类型]: {record_type}\n[已存在的旧记忆]: {old_record}\n[新记忆]: {new_record}"
-                )
+            self.judge_decision_prompt = (base / "judge_decision.txt").read_text(
+                encoding="utf-8"
+            )
         except Exception as e:
             raise IngestionError(f"Failed to load bundled prompt templates: {e}") from e
 
