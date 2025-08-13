@@ -127,7 +127,6 @@ class TestIngestionErrorHandling:
             Exception("API error")
         )
         mock_config.logs_base_dir = "./test_data/test_logs"
-        mock_config.prompt_templates_dir = ""
         mock_get_config.return_value = mock_config
 
         mock_storage = Mock()
@@ -151,7 +150,6 @@ class TestIngestionErrorHandling:
             "LLM API error"
         )
         mock_config.logs_base_dir = "./test_data/test_logs"
-        mock_config.prompt_templates_dir = ""
         mock_get_config.return_value = mock_config
 
         mock_storage = Mock()
@@ -185,7 +183,6 @@ class TestIngestionErrorHandling:
             mock_choice
         ]
         mock_config.logs_base_dir = "./test_data/test_logs"
-        mock_config.prompt_templates_dir = ""
         mock_get_config.return_value = mock_config
 
         mock_storage = Mock()

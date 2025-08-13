@@ -100,22 +100,7 @@ class MemoryConfig(BaseSettings):
         DEBUG = "DEBUG"
 
     log_level: LogLevel = Field(default=LogLevel.INFO, alias="LOG_LEVEL")
-    # Optional: external prompt templates directory; if empty, use packaged prompts
-    prompt_templates_dir: Path | None = Field(
-        default=None, alias="PROMPT_TEMPLATES_DIR"
-    )
-
-    @field_validator("prompt_templates_dir", mode="before")
-    @classmethod
-    def _normalize_prompt_dir(cls, v: Any) -> Any:
-        if v is None:
-            return None
-        if isinstance(v, str) and v.strip() == "":
-            return None
-        try:
-            return Path(v).expanduser()
-        except Exception:
-            return None
+    # No external prompt templates; always use packaged prompts
 
     @field_validator("logs_base_dir", mode="before")
     @classmethod
@@ -353,10 +338,6 @@ class MemoryConfig(BaseSettings):
             "embedding_dimension": self.embedding_dimension,
             "similarity_threshold_judge": self.similarity_threshold_judge,
             "logs_base_dir": str(self.logs_base_dir),
-            # Only base dir is relevant for artifacts
-            "prompt_templates_dir": str(self.prompt_templates_dir)
-            if self.prompt_templates_dir
-            else None,
             "log_enabled": self.log_enabled,
             "log_level": self.log_level,
             "chroma_anonymized_telemetry": self.chroma_anonymized_telemetry,

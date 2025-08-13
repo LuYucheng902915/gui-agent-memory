@@ -239,11 +239,10 @@ class TestMemoryIngestion:
             assert ingestion.experience_distillation_prompt == experience_prompt
             assert ingestion.keyword_extraction_prompt == keyword_prompt
 
-    def test_prompt_template_loading_from_external_dir(
+    def test_prompt_template_loading_ignores_external_dir(
         self, mock_config, mock_storage, tmp_path
     ):
-        """Test loading prompt templates from PROMPT_TEMPLATES_DIR when configured."""
-        # Create temporary template files
+        """External dir in config is ignored; bundled prompts are used."""
         ext_dir = tmp_path / "prompts"
         ext_dir.mkdir(parents=True)
         (ext_dir / "experience_distillation.txt").write_text(
@@ -263,8 +262,12 @@ class TestMemoryIngestion:
         ):
             ingestion = MemoryIngestion()
 
-            assert ingestion.experience_distillation_prompt.startswith("EXT experience")
-            assert ingestion.keyword_extraction_prompt.startswith("EXT keyword")
+            assert ingestion.experience_distillation_prompt.strip() != ""
+            assert ingestion.keyword_extraction_prompt.strip() != ""
+            assert not ingestion.experience_distillation_prompt.startswith(
+                "EXT experience"
+            )
+            assert not ingestion.keyword_extraction_prompt.startswith("EXT keyword")
 
     def test_prompt_template_loading_failure(self, mock_config, mock_storage):
         """Test error handling when prompt templates fail to load."""
@@ -284,7 +287,8 @@ class TestMemoryIngestion:
             with pytest.raises(IngestionError) as exc_info:
                 MemoryIngestion()
 
-            assert "Failed to load prompt templates" in str(exc_info.value)
+            # New message after consolidation
+            assert "Failed to load bundled prompt templates" in str(exc_info.value)
 
     def test_learn_from_complex_task(self, ingestion, mock_config, complex_raw_history):
         """Test learning from complex task with multiple action types."""

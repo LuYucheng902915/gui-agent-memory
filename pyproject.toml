@@ -131,3 +131,14 @@ show_missing = true
 # Use src layout: point to the package path under src
 packages = ["src/gui_agent_memory"]
 # Ensure prompt templates are included in the wheel
+include = [
+  "src/gui_agent_memory/prompts/*.txt",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/gui_agent_memory/**",
+  "README.md",
+  "LICENSE",
+  "docs/**",
+]

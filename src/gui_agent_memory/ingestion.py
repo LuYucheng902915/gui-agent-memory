@@ -61,44 +61,21 @@ class MemoryIngestion:
         self.logger.setLevel(logging.INFO)
 
     def _load_prompts(self) -> None:
-        """Load prompt templates from files."""
-        # First, resolve base directory and load the two primary templates.
+        """Load prompt templates from packaged resources only (robust to patched reads)."""
         try:
-            templates_dir = getattr(self.config, "prompt_templates_dir", None)
-            base: Path
-            if templates_dir:
-                base = Path(templates_dir)
-                external_ok = (base / "experience_distillation.txt").exists() and (
-                    base / "keyword_extraction.txt"
-                ).exists()
-                if not external_ok:
-                    base = Path(__file__).parent / "prompts"
-            else:
-                base = Path(__file__).parent / "prompts"
-
-            # Load experience distillation prompt
-            experience_prompt_path = base / "experience_distillation.txt"
-            self.experience_distillation_prompt = experience_prompt_path.read_text(
-                encoding="utf-8"
-            )
-
-            # Load keyword extraction prompt
-            keyword_prompt_path = base / "keyword_extraction.txt"
-            self.keyword_extraction_prompt = keyword_prompt_path.read_text(
-                encoding="utf-8"
-            )
-        except Exception as e:
-            raise IngestionError(f"Failed to load prompt templates: {e}") from e
-
-        # Then, try to load the optional judge template without failing the whole loading flow.
-        judge_prompt_path = base / "judge_decision.txt"
-        if judge_prompt_path.exists():
+            base = Path(__file__).parent / "prompts"
+            self.experience_distillation_prompt = (
+                base / "experience_distillation.txt"
+            ).read_text(encoding="utf-8")
+            self.keyword_extraction_prompt = (
+                base / "keyword_extraction.txt"
+            ).read_text(encoding="utf-8")
+            # Judge is optional in some tests; provide robust fallback when read is patched or file absent
             try:
-                self.judge_decision_prompt = judge_prompt_path.read_text(
+                self.judge_decision_prompt = (base / "judge_decision.txt").read_text(
                     encoding="utf-8"
                 )
             except Exception:
-                # Minimal fallback when read_text is patched with limited side effects in tests
                 self.judge_decision_prompt = (
                     "请在 add_new / update_existing / keep_new_delete_old / keep_old_delete_new 中选择其一，"
                     "只输出严格 JSON：{\n"
@@ -109,18 +86,8 @@ class MemoryIngestion:
                     "}\n"
                     "[记录类型]: {record_type}\n[已存在的旧记忆]: {old_record}\n[新记忆]: {new_record}"
                 )
-        else:
-            # Fallback when template is absent (e.g., external dir provides only two files)
-            self.judge_decision_prompt = (
-                "请在 add_new / update_existing / keep_new_delete_old / keep_old_delete_new 中选择其一，"
-                "只输出严格 JSON：{\n"
-                '  "decision": "add_new|update_existing|keep_new_delete_old|keep_old_delete_new",\n'
-                '  "target_id": null,\n'
-                '  "updated_record": null,\n'
-                '  "reason": ""\n'
-                "}\n"
-                "[记录类型]: {record_type}\n[已存在的旧记忆]: {old_record}\n[新记忆]: {new_record}"
-            )
+        except Exception as e:
+            raise IngestionError(f"Failed to load bundled prompt templates: {e}") from e
 
     # ----------------------------
     # Internal logging helpers

@@ -55,7 +55,7 @@ def mock_config():
     config.logs_base_dir = "./test_data/test_logs"
     config.log_enabled = True
     config.log_level = "INFO"
-    config.prompt_templates_dir = ""
+    # External prompt templates removed; always use bundled prompts
     config.rerank_candidate_limit = 20
     config.hybrid_topk_multiplier = 4
     config.http_timeout_seconds = 30
