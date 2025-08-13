@@ -201,8 +201,8 @@ class TestMemoryStorage:
 
         result = storage.get_collection_stats()
 
-        assert result["experiential_memories"] == 5
-        assert result["declarative_memories"] == 3
+        assert result[storage.config.experiential_collection_name] == 5
+        assert result[storage.config.declarative_collection_name] == 3
         assert result["total"] == 8
 
     @patch("gui_agent_memory.storage.chromadb")

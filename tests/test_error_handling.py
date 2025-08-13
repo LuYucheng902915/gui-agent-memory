@@ -126,9 +126,7 @@ class TestIngestionErrorHandling:
         mock_config.get_embedding_client.return_value.embeddings.create.side_effect = (
             Exception("API error")
         )
-        mock_config.failed_learning_log_path = (
-            "./test_data/test_logs/failed_learning.jsonl"
-        )
+        mock_config.logs_base_dir = "./test_data/test_logs"
         mock_config.prompt_templates_dir = ""
         mock_get_config.return_value = mock_config
 
@@ -152,9 +150,7 @@ class TestIngestionErrorHandling:
         mock_config.get_experience_llm_client.return_value.chat.completions.create.side_effect = Exception(
             "LLM API error"
         )
-        mock_config.failed_learning_log_path = (
-            "./test_data/test_logs/failed_learning.jsonl"
-        )
+        mock_config.logs_base_dir = "./test_data/test_logs"
         mock_config.prompt_templates_dir = ""
         mock_get_config.return_value = mock_config
 
@@ -188,9 +184,7 @@ class TestIngestionErrorHandling:
         mock_config.get_experience_llm_client.return_value.chat.completions.create.return_value.choices = [
             mock_choice
         ]
-        mock_config.failed_learning_log_path = (
-            "./test_data/test_logs/failed_learning.jsonl"
-        )
+        mock_config.logs_base_dir = "./test_data/test_logs"
         mock_config.prompt_templates_dir = ""
         mock_get_config.return_value = mock_config
 

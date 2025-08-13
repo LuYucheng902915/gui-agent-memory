@@ -129,7 +129,6 @@ class TestMemoryConfig:
             "DEFAULT_TOP_N",
             "EMBEDDING_DIMENSION",
             "CHROMA_DB_PATH",
-            "FAILED_LEARNING_LOG_PATH",
         ]:
             monkeypatch.delenv(key, raising=False)
 

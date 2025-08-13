@@ -51,9 +51,8 @@ def mock_config():
     config.default_top_k = 20
     config.default_top_n = 3
     config.embedding_dimension = 10
-    config.failed_learning_log_path = "./test_data/test_logs/failed_learning.jsonl"
-    config.prompt_log_dir = "./test_data/test_logs/prompts"
-    config.operation_log_dir = "./test_data/test_logs/operations"
+    # Unified logs root for operation artifacts
+    config.logs_base_dir = "./test_data/test_logs"
     config.log_enabled = True
     config.log_level = "INFO"
     config.prompt_templates_dir = ""

@@ -498,7 +498,7 @@ class MemoryStorage:
                 query_texts=query_texts,
                 where=where,
                 n_results=n_results,
-                include=["distances", "embeddings"],
+                include=["documents", "metadatas", "distances", "embeddings"],
             )
             return cast(dict[str, list[Any]], result)
         except Exception as e:
@@ -532,7 +532,7 @@ class MemoryStorage:
                 query_texts=query_texts,
                 where=where,
                 n_results=n_results,
-                include=["distances", "embeddings"],
+                include=["documents", "metadatas", "distances", "embeddings"],
             )
             return cast(dict[str, list[Any]], result)
         except Exception as e:
@@ -571,8 +571,8 @@ class MemoryStorage:
             declarative_count = self.declarative_collection.count()
 
             return {
-                "experiential_memories": experiential_count,
-                "declarative_memories": declarative_count,
+                self.config.experiential_collection_name: experiential_count,
+                self.config.declarative_collection_name: declarative_count,
                 "total": experiential_count + declarative_count,
             }
         except Exception as e:

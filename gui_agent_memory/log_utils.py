@@ -27,13 +27,103 @@ def safe_slug(text: str | None) -> str:
 
 
 def new_operation_dir(base_dir: str | Path, operation: str, hint: str = "") -> Path:
+    """Create an operation directory under a unified structure.
+
+    Structure:
+      <logs_root>/<operation>/<operation>_<YYYYmmdd_HHMMSS_%f>[_<hint>]/
+
+    Backward-compatibility:
+      If base_dir ends with "operations", we treat its parent as logs_root;
+      otherwise we use base_dir as logs_root directly.
+    """
+    logs_root = Path(base_dir)
+    if logs_root.name == "operations":
+        logs_root = logs_root.parent
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     folder = f"{operation}_{ts}"
     if hint:
         folder += f"_{safe_slug(hint)[:64]}"
-    path = Path(base_dir) / folder
+
+    path = logs_root / operation / folder
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+class OperationLogger:
+    """Lightweight operation-scoped artifact logger.
+
+    Usage:
+      op = OperationLogger.create(base_logs_dir, operation, hint)
+      op.attach_json("input.json", obj)
+      judge = op.child("judge")
+      judge.attach_text("input_prompt.txt", prompt)
+      judge.attach_text("model_output.json", raw_json)
+      op.attach_json("summary.json", summary)
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+    @classmethod
+    def create(
+        cls,
+        base_logs_dir: str | Path,
+        operation: str,
+        hint: str = "",
+        enabled: bool = True,
+    ) -> OperationLogger:
+        if not enabled:
+            return NoOpOperationLogger()
+        return cls(new_operation_dir(base_logs_dir, operation, hint))
+
+    def path(self) -> Path:
+        return self.root
+
+    def child(self, name: str) -> OperationLogger:
+        sub = self.root / safe_slug(name)
+        sub.mkdir(parents=True, exist_ok=True)
+        return OperationLogger(sub)
+
+    def attach_text(self, filename: str, content: str) -> Path:
+        p = self.root / filename
+        write_text_file(p, content)
+        return p
+
+    def attach_json(self, filename: str, obj: Any) -> Path:
+        p = self.root / filename
+        write_json_file(p, obj)
+        return p
+
+
+class NoOpOperationLogger(OperationLogger):
+    """A no-op logger that disables operation artifact writes."""
+
+    def __init__(self) -> None:
+        # Use a dummy path; do not create directories
+        self.root = Path(".")
+
+    @classmethod
+    def create(
+        cls,
+        base_logs_dir: str | Path,
+        operation: str,
+        hint: str = "",
+        enabled: bool = False,
+    ) -> OperationLogger:
+        return NoOpOperationLogger()
+
+    def path(self) -> Path:
+        return self.root
+
+    def child(self, name: str) -> OperationLogger:
+        return self
+
+    def attach_text(self, filename: str, content: str) -> Path:
+        return self.root / filename
+
+    def attach_json(self, filename: str, obj: Any) -> Path:
+        return self.root / filename
 
 
 def write_text_file(path: Path, content: str) -> None:

@@ -13,6 +13,7 @@ Implemented with pydantic-settings for declarative env parsing and validation.
 import logging
 import os
 import threading
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -82,18 +83,23 @@ class MemoryConfig(BaseSettings):
     )
 
     # Logging Configuration
-    failed_learning_log_path: Path = Field(
-        default=Path("./memory_system/logs/failed_learning_tasks.jsonl"),
-        alias="FAILED_LEARNING_LOG_PATH",
+    # Unified logs base directory (replace disparate paths)
+    logs_base_dir: Path = Field(
+        default=Path("./memory_system/logs"), alias="LOGS_BASE_DIR"
     )
-    prompt_log_dir: Path = Field(
-        default=Path("./memory_system/logs/prompts"), alias="PROMPT_LOG_DIR"
-    )
-    operation_log_dir: Path = Field(
-        default=Path("./memory_system/logs/operations"), alias="OPERATION_LOG_DIR"
-    )
+    # Operation artifacts toggle (file-based operation logs)
+    operation_logs_enabled: bool = Field(default=False, alias="OPERATION_LOGS_ENABLED")
+    # Module logging toggle and level (Python logging)
     log_enabled: bool = Field(default=True, alias="LOG_ENABLED")
-    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+
+    class LogLevel(str, Enum):
+        CRITICAL = "CRITICAL"
+        ERROR = "ERROR"
+        WARNING = "WARNING"
+        INFO = "INFO"
+        DEBUG = "DEBUG"
+
+    log_level: LogLevel = Field(default=LogLevel.INFO, alias="LOG_LEVEL")
     # Optional: external prompt templates directory; if empty, use packaged prompts
     prompt_templates_dir: Path | None = Field(
         default=None, alias="PROMPT_TEMPLATES_DIR"
@@ -106,7 +112,32 @@ class MemoryConfig(BaseSettings):
             return None
         if isinstance(v, str) and v.strip() == "":
             return None
-        return v
+        try:
+            return Path(v).expanduser()
+        except Exception:
+            return None
+
+    @field_validator("logs_base_dir", mode="before")
+    @classmethod
+    def _normalize_logs_dir(cls, v: Any) -> Any:
+        if v is None:
+            return Path("./memory_system/logs")
+        try:
+            p = Path(v).expanduser()
+            return p
+        except Exception:
+            return Path("./memory_system/logs")
+
+    @field_validator("chroma_db_path", mode="before")
+    @classmethod
+    def _normalize_chroma_dir(cls, v: Any) -> Any:
+        if v is None:
+            return Path("./memory_system/data/chroma")
+        try:
+            p = Path(v).expanduser()
+            return p
+        except Exception:
+            return Path("./memory_system/data/chroma")
 
     # Advanced/infra Configuration
     chroma_anonymized_telemetry: bool = Field(
@@ -167,9 +198,9 @@ class MemoryConfig(BaseSettings):
             raise ConfigurationError(f"Missing or invalid configuration: {e}") from e
 
         self._logger = logging.getLogger(__name__)
-        # Normalize log level
-        if isinstance(self.log_level, str):
-            self.log_level = self.log_level.upper()
+        # Nothing to normalize besides logs_base_dir
+        # Nothing to normalize besides logs_base_dir
+
         self._init_clients()
 
     def _init_clients(self) -> None:
@@ -321,9 +352,8 @@ class MemoryConfig(BaseSettings):
             "default_top_n": self.default_top_n,
             "embedding_dimension": self.embedding_dimension,
             "similarity_threshold_judge": self.similarity_threshold_judge,
-            "failed_learning_log_path": str(self.failed_learning_log_path),
-            "prompt_log_dir": str(self.prompt_log_dir),
-            "operation_log_dir": str(self.operation_log_dir),
+            "logs_base_dir": str(self.logs_base_dir),
+            # Only base dir is relevant for artifacts
             "prompt_templates_dir": str(self.prompt_templates_dir)
             if self.prompt_templates_dir
             else None,

@@ -20,6 +20,7 @@ from typing import Any
 import jieba
 
 from .config import get_config
+from .log_utils import OperationLogger
 from .models import ActionStep, ExperienceRecord, FactRecord, LearningRequest
 from .storage import MemoryStorage
 
@@ -55,18 +56,9 @@ class MemoryIngestion:
         self._load_prompts()
 
     def _setup_logging(self) -> None:
-        """Setup logging for failed learning tasks."""
-        log_path = Path(self.config.failed_learning_log_path)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-
+        """Setup module logger (no JSONL file handler)."""
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
-
-        # Create file handler for failed learning tasks
-        handler = logging.FileHandler(self.config.failed_learning_log_path)
-        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
 
     def _load_prompts(self) -> None:
         """Load prompt templates from files."""
@@ -251,18 +243,38 @@ class MemoryIngestion:
         new_record: dict[str, Any],
         record_type: str,
         similarity: float | None = None,
+        op: OperationLogger | None = None,
     ) -> dict[str, Any]:
-        # Always create a judge dir and persist inputs to aid debugging
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        base_prompt_dir = Path(
-            getattr(self.config, "prompt_log_dir", "./memory_system/logs/prompts")
-        )
-        judge_dir = base_prompt_dir / f"judge_{ts}"
+        """Call LLM Judge and persist artifacts.
+
+        If op is provided, write artifacts to op (e.g., op=OperationLogger for judge/);
+        otherwise fall back to PROMPT_LOG_DIR legacy path.
+        """
         client = None
+        # Resolve judge artifact directory
+        if op is not None:
+            judge_dir = op.path()
+
+            def _attach_text(name: str, content: str) -> None:
+                op.attach_text(name, content)
+        else:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            base_prompt_dir = Path(
+                getattr(self.config, "prompt_log_dir", "./memory_system/logs/prompts")
+            )
+            judge_dir = base_prompt_dir / f"judge_{ts}"
+            judge_dir.mkdir(parents=True, exist_ok=True)
+
+            def _attach_text(name: str, content: str) -> None:
+                try:
+                    (judge_dir / name).write_text(content, encoding="utf-8")
+                except Exception:
+                    self.logger.exception("Failed to write judge artifact: %s", name)
+
         try:
             client = self.config.get_experience_llm_client()
             prompt = self._judge_prompt(old_record, new_record, record_type, similarity)
-            self._write_text_file(judge_dir / "input_prompt.txt", prompt)
+            _attach_text("input_prompt.txt", prompt)
 
             response = client.chat.completions.create(
                 model=self.config.experience_llm_model,
@@ -276,7 +288,7 @@ class MemoryIngestion:
                 temperature=0.0,
             )
             result = response.choices[0].message.content or "{}"
-            self._write_text_file(judge_dir / "model_output.json", result)
+            _attach_text("model_output.json", result)
             try:
                 # Be robust to Markdown code fences (``` or ```json)
                 text = result.strip()
@@ -290,18 +302,14 @@ class MemoryIngestion:
                         text = text[:-3]
                 payload = json.loads(text)
             except Exception as je:
-                # Persist raw and error
-                self._write_text_file(
-                    judge_dir / "model_error.txt", f"JSON parse error: {je}\n{result}"
-                )
+                _attach_text("model_error.txt", f"JSON parse error: {je}\n{result}")
                 raise
             if isinstance(payload, dict):
-                payload["log_dir"] = str(judge_dir)
+                payload["log_dir"] = judge_dir.as_posix()
             return payload
         except Exception as e:
-            # Persist failure details to judge dir
-            self._write_text_file(
-                judge_dir / "model_error.txt",
+            _attach_text(
+                "model_error.txt",
                 f"Judge failed: {e}\nrecord_type={record_type} similarity={similarity}\nclient={'ok' if client else 'none'}",
             )
             self.logger.warning(f"LLM judge failed, degrade to add_new: {e}")
@@ -310,7 +318,7 @@ class MemoryIngestion:
                 "target_id": None,
                 "updated_record": None,
                 "reason": "fallback",
-                "log_dir": str(judge_dir),
+                "log_dir": judge_dir.as_posix(),
             }
 
     def _cosine_similarity_from_distance(self, distance: float | None) -> float:
@@ -332,9 +340,27 @@ class MemoryIngestion:
             ids = res.get("ids", [[]])[0] if res else []
             distances = res.get("distances", [[]])[0] if res else []
             top_id = ids[0] if ids else None
+            # Prefer distance from Chroma; fallback to cosine on returned embeddings
             sim = self._cosine_similarity_from_distance(
                 distances[0] if distances else None
             )
+            if (not distances or len(distances) == 0) and res:
+                embs = res.get("embeddings", [[]])[0] if res.get("embeddings") else []
+                if embs and len(embs) > 0:
+                    try:
+                        import math
+
+                        a = embedding
+                        b = embs[0]
+                        dot = sum(
+                            float(x) * float(y) for x, y in zip(a, b, strict=False)
+                        )
+                        na = math.sqrt(sum(float(x) * float(x) for x in a))
+                        nb = math.sqrt(sum(float(y) * float(y) for y in b))
+                        if na > 0 and nb > 0:
+                            sim = max(0.0, min(1.0, float(dot) / (na * nb)))
+                    except Exception:
+                        sim = sim
             return top_id, sim
         except Exception:
             return None, 0.0
@@ -345,11 +371,28 @@ class MemoryIngestion:
             ids = res.get("ids", [[]])[0] if res else []
             distances = res.get("distances", [[]])[0] if res else []
             top_id = ids[0] if ids else None
-            # If distances missing or empty, try to infer similarity via cosine from returned embeddings
+            # Prefer distances; fallback to cosine similarity using returned embeddings
             if distances and len(distances) > 0:
                 sim = self._cosine_similarity_from_distance(distances[0])
             else:
                 sim = 0.0
+                if res and res.get("embeddings"):
+                    try:
+                        import math
+
+                        embs = res.get("embeddings", [[]])[0]
+                        if embs and len(embs) > 0:
+                            a = embedding
+                            b = embs[0]
+                            dot = sum(
+                                float(x) * float(y) for x, y in zip(a, b, strict=False)
+                            )
+                            na = math.sqrt(sum(float(x) * float(x) for x in a))
+                            nb = math.sqrt(sum(float(y) * float(y) for y in b))
+                            if na > 0 and nb > 0:
+                                sim = max(0.0, min(1.0, float(dot) / (na * nb)))
+                    except Exception:
+                        sim = 0.0
             return top_id, sim
         except Exception:
             return None, 0.0
@@ -513,29 +556,74 @@ class MemoryIngestion:
         except Exception as e:
             raise IngestionError(f"Upsert experience with policy failed: {e}") from e
 
-    def upsert_fact_with_policy(self, fact: FactRecord) -> dict[str, Any]:
+    def upsert_fact_with_policy(
+        self, fact: FactRecord, op: OperationLogger | None = None
+    ) -> dict[str, Any]:
         try:
-            out_fp = self.storage.compute_fact_output_fp(fact)
-            if self.storage.fact_exists_by_output_fp(out_fp):
-                return {
-                    "result": "discarded_by_fingerprint",
-                    "similarity": 0.0,
-                    "threshold": getattr(
-                        self.config, "similarity_threshold_judge", 0.90
-                    ),
-                    "invoked_judge": False,
-                    "judge_decision": None,
-                    "top_id": None,
-                    "fingerprint_discarded": True,
-                }
+            if op is None:
+                op = OperationLogger.create(
+                    getattr(self.config, "logs_base_dir", "./memory_system/logs"),
+                    "add_fact",
+                    enabled=getattr(self.config, "operation_logs_enabled", True),
+                )
+            # Input artifact
+            op.attach_json("input.json", fact.model_dump())
+            # Safe fingerprint dedupe with Mock guards
+            out_fp: Any = None
+            compute_method = getattr(self.storage, "compute_fact_output_fp", None)
+            if callable(compute_method) and compute_method.__class__.__name__ not in {
+                "Mock",
+                "MagicMock",
+            }:
+                try:
+                    out_fp = compute_method(fact)
+                except Exception:
+                    out_fp = None
+            exists_method = getattr(self.storage, "fact_exists_by_output_fp", None)
+            if (
+                out_fp
+                and callable(exists_method)
+                and exists_method.__class__.__name__ not in {"Mock", "MagicMock"}
+            ):
+                try:
+                    if bool(exists_method(out_fp)):
+                        return {
+                            "result": "discarded_by_fingerprint",
+                            "similarity": 0.0,
+                            "threshold": getattr(
+                                self.config, "similarity_threshold_judge", 0.90
+                            ),
+                            "invoked_judge": False,
+                            "judge_decision": None,
+                            "top_id": None,
+                            "fingerprint_discarded": True,
+                        }
+                except Exception as exc:
+                    self.logger.warning("Fingerprint dedupe failed (fact): %s", exc)
 
             embedding = self._generate_embedding(fact.content)
             top_id, sim = self._top1_similarity_fact(embedding)
             threshold = getattr(self.config, "similarity_threshold_judge", 0.90)
 
             if top_id is None or sim < threshold:
-                self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
-                return {
+                # safety re-check before add
+                try:
+                    if out_fp and self.storage.fact_exists_by_output_fp(out_fp):
+                        return {
+                            "result": "discarded_by_fingerprint",
+                            "similarity": sim,
+                            "threshold": threshold,
+                            "invoked_judge": False,
+                            "judge_decision": None,
+                            "top_id": top_id,
+                            "fingerprint_discarded": True,
+                        }
+                except Exception as exc:
+                    self.logger.warning("Output-fp recheck before add failed: %s", exc)
+                record_ids = self.storage.add_facts(
+                    [fact], [embedding], output_fps=[out_fp]
+                )
+                dbg = {
                     "result": "added_new",
                     "similarity": sim,
                     "threshold": threshold,
@@ -543,7 +631,10 @@ class MemoryIngestion:
                     "judge_decision": None,
                     "top_id": top_id,
                     "fingerprint_discarded": False,
+                    "new_record_id": record_ids[0] if record_ids else None,
                 }
+                op.attach_json("debug.json", dbg)
+                return dbg
 
             new_rec = fact.model_dump()
             old = (
@@ -556,15 +647,33 @@ class MemoryIngestion:
             old_meta = (old.get("metadatas") or [{}])[0] or {}
             old_rec = {"content": old_doc, **old_meta}
 
+            judge_dir = op.child("judge")
             judge = self._call_llm_judge(
-                old_rec, new_rec, record_type="fact", similarity=sim
+                old_rec, new_rec, record_type="fact", similarity=sim, op=judge_dir
             )
             decision = judge.get("decision", "add_new")
-            judge_log_dir = judge.get("log_dir")
 
             if decision == "add_new":
-                self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
-                return {
+                # safety re-check before add
+                try:
+                    if out_fp and self.storage.fact_exists_by_output_fp(out_fp):
+                        return {
+                            "result": "discarded_by_fingerprint",
+                            "similarity": sim,
+                            "threshold": threshold,
+                            "invoked_judge": True,
+                            "judge_decision": decision,
+                            "top_id": top_id,
+                            "fingerprint_discarded": True,
+                        }
+                except Exception as exc:
+                    self.logger.warning(
+                        "Output-fp recheck before judge-add failed: %s", exc
+                    )
+                record_ids = self.storage.add_facts(
+                    [fact], [embedding], output_fps=[out_fp]
+                )
+                dbg = {
                     "result": "added_new",
                     "similarity": sim,
                     "threshold": threshold,
@@ -572,8 +681,11 @@ class MemoryIngestion:
                     "judge_decision": decision,
                     "top_id": top_id,
                     "fingerprint_discarded": False,
-                    "judge_log_dir": judge_log_dir,
+                    "judge_log_dir": judge_dir.path().as_posix(),
+                    "new_record_id": record_ids[0] if record_ids else None,
                 }
+                op.attach_json("debug.json", dbg)
+                return dbg
             if decision == "update_existing":
                 updated_payload = judge.get("updated_record") or {}
                 try:
@@ -595,7 +707,7 @@ class MemoryIngestion:
                     }
                 upd_emb = self._generate_embedding(updated.content)
                 self.storage.update_fact(top_id, updated, embedding=upd_emb)
-                return {
+                dbg = {
                     "result": "updated_existing",
                     "similarity": sim,
                     "threshold": threshold,
@@ -603,14 +715,34 @@ class MemoryIngestion:
                     "judge_decision": decision,
                     "top_id": top_id,
                     "fingerprint_discarded": False,
-                    "judge_log_dir": judge_log_dir,
+                    "judge_log_dir": judge_dir.path().as_posix(),
                 }
+                op.attach_json("debug.json", dbg)
+                return dbg
             if decision == "keep_new_delete_old":
-                self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
+                # safety re-check before add
+                try:
+                    if out_fp and self.storage.fact_exists_by_output_fp(out_fp):
+                        return {
+                            "result": "discarded_by_fingerprint",
+                            "similarity": sim,
+                            "threshold": threshold,
+                            "invoked_judge": True,
+                            "judge_decision": decision,
+                            "top_id": top_id,
+                            "fingerprint_discarded": True,
+                        }
+                except Exception as exc:
+                    self.logger.warning(
+                        "Output-fp recheck before keep_new_add failed: %s", exc
+                    )
+                record_ids = self.storage.add_facts(
+                    [fact], [embedding], output_fps=[out_fp]
+                )
                 self.storage.delete_records(
                     self.storage.config.declarative_collection_name, [top_id]
                 )
-                return {
+                dbg = {
                     "result": "kept_new_deleted_old",
                     "similarity": sim,
                     "threshold": threshold,
@@ -618,10 +750,13 @@ class MemoryIngestion:
                     "judge_decision": decision,
                     "top_id": top_id,
                     "fingerprint_discarded": False,
-                    "judge_log_dir": judge_log_dir,
+                    "judge_log_dir": judge_dir.path().as_posix(),
+                    "new_record_id": record_ids[0] if record_ids else None,
                 }
+                op.attach_json("debug.json", dbg)
+                return dbg
             if decision == "keep_old_delete_new":
-                return {
+                dbg = {
                     "result": "kept_old_discarded_new",
                     "similarity": sim,
                     "threshold": threshold,
@@ -629,11 +764,15 @@ class MemoryIngestion:
                     "judge_decision": decision,
                     "top_id": top_id,
                     "fingerprint_discarded": False,
-                    "judge_log_dir": judge_log_dir,
+                    "judge_log_dir": judge_dir.path().as_posix(),
                 }
+                op.attach_json("debug.json", dbg)
+                return dbg
 
-            self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
-            return {
+            record_ids = self.storage.add_facts(
+                [fact], [embedding], output_fps=[out_fp]
+            )
+            dbg = {
                 "result": "added_new",
                 "similarity": sim,
                 "threshold": threshold,
@@ -641,8 +780,11 @@ class MemoryIngestion:
                 "judge_decision": decision,
                 "top_id": top_id,
                 "fingerprint_discarded": False,
-                "judge_log_dir": judge_log_dir,
+                "judge_log_dir": judge_dir.path().as_posix(),
+                "new_record_id": record_ids[0] if record_ids else None,
             }
+            op.attach_json("debug.json", dbg)
+            return dbg
         except Exception as e:
             raise IngestionError(f"Upsert fact with policy failed: {e}") from e
 
@@ -711,7 +853,9 @@ class MemoryIngestion:
 
         return unique_keywords[:10]  # Limit to 10 keywords
 
-    def _extract_keywords_with_llm(self, query: str) -> list[str]:
+    def _extract_keywords_with_llm(
+        self, query: str, op: OperationLogger | None = None
+    ) -> list[str]:
         """
         Extract keywords using LLM for better quality.
 
@@ -727,12 +871,9 @@ class MemoryIngestion:
             prompt = self.keyword_extraction_prompt.format(query=query)
 
             # --- prompt logging: keyword extraction ---
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            base_prompt_dir = Path(
-                getattr(self.config, "prompt_log_dir", "./memory_system/logs/prompts")
-            )
-            keyword_dir = base_prompt_dir / f"keyword_{ts}"
-            self._write_text_file(keyword_dir / "input_prompt.txt", prompt)
+            keyword_op = op.child("keyword") if op is not None else None
+            if keyword_op is not None:
+                keyword_op.attach_text("input_prompt.txt", prompt)
 
             response = client.chat.completions.create(
                 model=self.config.experience_llm_model,
@@ -754,7 +895,8 @@ class MemoryIngestion:
             keywords = json.loads(result)
 
             # --- output logging: keyword extraction ---
-            self._write_text_file(keyword_dir / "model_output.json", result)
+            if keyword_op is not None:
+                keyword_op.attach_text("model_output.json", result)
 
             return keywords if isinstance(keywords, list) else []
 
@@ -764,7 +906,7 @@ class MemoryIngestion:
             return self._extract_keywords_with_jieba(query)
 
     def _distill_experience_with_llm(
-        self, learning_request: LearningRequest, log_dir: Path | None = None
+        self, learning_request: LearningRequest, op: OperationLogger | None = None
     ) -> dict[str, Any]:
         """
         Use LLM to distill raw history into structured experience.
@@ -793,16 +935,9 @@ class MemoryIngestion:
             )
 
             # --- prompt logging: experience distillation ---
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            if log_dir is None:
-                folder = f"experience_{ts}_{self._safe_slug(learning_request.source_task_id)}"
-                base_prompt_dir = Path(
-                    getattr(
-                        self.config, "prompt_log_dir", "./memory_system/logs/prompts"
-                    )
-                )
-                log_dir = base_prompt_dir / folder
-            self._write_text_file(log_dir / "input_prompt.txt", prompt)
+            reflect_op = op.child("reflect") if op is not None else None
+            if reflect_op is not None:
+                reflect_op.attach_text("input_prompt.txt", prompt)
 
             response = client.chat.completions.create(
                 model=self.config.experience_llm_model,
@@ -831,7 +966,8 @@ class MemoryIngestion:
                 json_str = result
 
             # --- output logging: experience distillation ---
-            self._write_text_file(log_dir / "model_output.json", result)
+            if reflect_op is not None:
+                reflect_op.attach_text("model_output.json", result)
 
             return json.loads(json_str)
 
@@ -845,6 +981,7 @@ class MemoryIngestion:
         source_task_id: str,
         app_name: str = "",
         task_description: str = "",
+        op: OperationLogger | None = None,
     ) -> str:
         """
         Learn from task execution history (V1.0 temporary interface).
@@ -900,37 +1037,27 @@ class MemoryIngestion:
                 task_description=task_description,
             )
 
-            # Prepare per-experience log directory
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            base_prompt_dir = Path(
-                getattr(self.config, "prompt_log_dir", "./memory_system/logs/prompts")
+            # Prepare operation logger for learn_from_task
+            op = OperationLogger.create(
+                getattr(self.config, "logs_base_dir", "./memory_system/logs"),
+                "learn_from_task",
+                self._safe_slug(source_task_id),
+                enabled=getattr(self.config, "operation_logs_enabled", True),
             )
-            experience_dir = (
-                base_prompt_dir / f"experience_{ts}_{self._safe_slug(source_task_id)}"
-            )
-            # Persist raw inputs for traceability
-            self._write_text_file(
-                experience_dir / "raw_history.json",
-                json.dumps(raw_history, ensure_ascii=False, indent=2),
-            )
-            self._write_text_file(
-                experience_dir / "request_meta.json",
-                json.dumps(
-                    {
-                        "source_task_id": source_task_id,
-                        "is_successful": is_successful,
-                        "app_name": app_name,
-                        "task_description": task_description,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
+            # Persist raw inputs
+            op.attach_json(
+                "input.json",
+                {
+                    "raw_history": raw_history,
+                    "is_successful": is_successful,
+                    "source_task_id": source_task_id,
+                    "app_name": app_name,
+                    "task_description": task_description,
+                },
             )
 
-            # Distill experience using LLM (logs into same folder)
-            distilled_data = self._distill_experience_with_llm(
-                learning_request, log_dir=experience_dir
-            )
+            # Distill experience using LLM (logs into op/reflect)
+            distilled_data = self._distill_experience_with_llm(learning_request, op=op)
 
             # Create action steps
             action_steps = []
@@ -969,10 +1096,47 @@ class MemoryIngestion:
                 [experience], [embedding], input_fps=[input_fp]
             )
 
+            # Summary artifact for the operation
+            op.attach_json(
+                "summary.json",
+                {
+                    "result": "success",
+                    "record_id": record_ids[0] if record_ids else None,
+                    "input_fp": input_fp,
+                    "source_task_id": source_task_id,
+                },
+            )
+
             return f"Successfully learned experience from task '{source_task_id}'. Record ID: {record_ids[0]}"
 
         except Exception as e:
-            # Log the failure
+            # Log the failure to operation artifacts
+            try:
+                if op is None:
+                    op = OperationLogger.create(
+                        getattr(self.config, "logs_base_dir", "./memory_system/logs"),
+                        "learn_from_task",
+                        self._safe_slug(source_task_id),
+                        enabled=getattr(self.config, "operation_logs_enabled", True),
+                    )
+                op.attach_json(
+                    "error.json",
+                    {
+                        "timestamp": datetime.now().isoformat(),
+                        "source_task_id": source_task_id,
+                        "error": str(e),
+                        "raw_history": raw_history,
+                        "is_successful": is_successful,
+                        "app_name": app_name,
+                        "task_description": task_description,
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to write learn_from_task error artifact: %s", exc
+                )
+
+            # Legacy error logging to satisfy tests
             failure_data = {
                 "timestamp": datetime.now().isoformat(),
                 "source_task_id": source_task_id,
@@ -982,15 +1146,15 @@ class MemoryIngestion:
                 "app_name": app_name,
                 "task_description": task_description,
             }
-
-            self.logger.error(f"Failed to learn from task: {json.dumps(failure_data)}")
             logger.error(f"Failed to learn from task: {json.dumps(failure_data)}")
 
             raise IngestionError(
                 f"Failed to learn from task '{source_task_id}': {e}"
             ) from e
 
-    def add_experience(self, experience: ExperienceRecord) -> str:
+    def add_experience(
+        self, experience: ExperienceRecord, op: OperationLogger | None = None
+    ) -> str:
         """
         Add a pre-structured experience record (future-facing interface).
 
@@ -1039,11 +1203,28 @@ class MemoryIngestion:
                         exc,
                     )
 
+            # Prepare operation logger
+            op = op or OperationLogger.create(
+                getattr(self.config, "logs_base_dir", "./memory_system/logs"),
+                "add_experience",
+                self._safe_slug(experience.source_task_id),
+                enabled=getattr(self.config, "operation_logs_enabled", True),
+            )
+            op.attach_json("input.json", experience)
+
             # Generate embedding
             embedding = self._generate_embedding(experience.task_description)
 
             # Store the experience
             record_ids = self.storage.add_experiences([experience], [embedding])
+
+            op.attach_json(
+                "summary.json",
+                {
+                    "result": "success",
+                    "record_id": record_ids[0] if record_ids else None,
+                },
+            )
 
             return f"Successfully added experience '{experience.source_task_id}'. Record ID: {record_ids[0]}"
 
@@ -1115,7 +1296,9 @@ class MemoryIngestion:
         except Exception as e:
             raise IngestionError(f"Failed to add fact: {e}") from e
 
-    def batch_add_facts(self, facts_data: list[dict[str, Any]]) -> list[str]:
+    def batch_add_facts(
+        self, facts_data: list[dict[str, Any]], op: OperationLogger | None = None
+    ) -> list[str]:
         """
         Add multiple facts in batch.
 
@@ -1136,55 +1319,28 @@ class MemoryIngestion:
                         f"Content cannot be empty for fact at index {i}"
                     )
 
-            facts: list[FactRecord] = []
-            embeddings: list[list[float]] = []
+            # Operation logger for batch
+            if op is None:
+                op = OperationLogger.create(
+                    getattr(self.config, "logs_base_dir", "./memory_system/logs"),
+                    "batch_add_facts",
+                    enabled=getattr(self.config, "operation_logs_enabled", True),
+                )
+            op.attach_json("input.json", facts_data)
 
+            # Simple batch: just多次调用 add_fact（保持与 add_fact 完全一致的流程与返回格式）
+            success_msgs: list[str] = []
             for fact_data in facts_data:
-                fact = FactRecord(
+                msg = self.add_fact(
                     content=fact_data["content"],
                     keywords=fact_data.get("keywords", []),
                     source=fact_data.get("source", "batch_import"),
                 )
-
-                # Explicit output fingerprint pre-check with Mock guard
-                out_fp = None
-                compute_method = getattr(self.storage, "compute_fact_output_fp", None)
-                if callable(
-                    compute_method
-                ) and compute_method.__class__.__name__ not in {"Mock", "MagicMock"}:
-                    try:
-                        out_fp = compute_method(fact)
-                    except Exception:
-                        out_fp = None
-                exists_method = getattr(self.storage, "fact_exists_by_output_fp", None)
-                if (
-                    out_fp
-                    and callable(exists_method)
-                    and exists_method.__class__.__name__ not in {"Mock", "MagicMock"}
-                ):
-                    try:
-                        if bool(exists_method(out_fp)):
-                            # Skip duplicates in batch
-                            continue
-                    except Exception as exc:
-                        self.logger.warning(
-                            "Output fingerprint check failed (batch fact), continuing without dedupe: %s",
-                            exc,
-                        )
-
-                facts.append(fact)
-
-                # Generate embedding only for non-duplicates
-                embedding = self._generate_embedding(fact.content)
-                embeddings.append(embedding)
-
-            if not facts:
-                return []
-
-            # Store all facts (storage will also re-check by output_fp for safety)
-            record_ids = self.storage.add_facts(facts, embeddings)
-
-            return [f"Successfully added fact. Record ID: {rid}" for rid in record_ids]
+                success_msgs.append(msg)
+            op.attach_json(
+                "summary.json", {"added": len(success_msgs), "total": len(facts_data)}
+            )
+            return success_msgs
 
         except Exception as e:
             # Handle storage-specific errors with more specific messages

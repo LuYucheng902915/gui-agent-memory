@@ -100,7 +100,7 @@ def demonstrate_fact_management(memory: MemorySystem):
     print_subsection("批量添加事实")
     facts_data = [
         {
-            "content": "Git是分布式版本控制系统，由Linus Torvalds创建",
+            "content": "Git是分布式版本控制系统，由厉害的Linus Torvalds创建",
             "keywords": ["Git", "版本控制", "Linus Torvalds", "分布式"],
             "source": "demo_knowledge_base",
         },

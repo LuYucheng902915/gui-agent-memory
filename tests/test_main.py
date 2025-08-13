@@ -549,7 +549,11 @@ class TestMemorySystemAdditionalMethods:
         result = memory_system.add_experience(experience)
 
         assert result == "exp_123"
-        memory_system._mock_ingestion.add_experience.assert_called_once_with(experience)
+        # 新签名包含 op，使用 kwargs 断言核心参数
+        assert memory_system._mock_ingestion.add_experience.call_count == 1
+        args, kwargs = memory_system._mock_ingestion.add_experience.call_args
+        assert args[0] == experience
+        assert "op" in kwargs
 
     def test_add_experience_invalid_type(self, memory_system):
         """Test add_experience with invalid experience type."""
@@ -902,7 +906,7 @@ class TestConfigurationDefaultValues:
         custom_config.reranker_model = "test-reranker"
         custom_config.experience_llm_model = "test-llm"
         custom_config.chroma_db_path = "/test/path"
-        custom_config.operation_log_dir = "./test_data/test_logs/operations"
+        custom_config.logs_base_dir = "./test_data/test_logs"
         custom_config.log_enabled = True
 
         with (
