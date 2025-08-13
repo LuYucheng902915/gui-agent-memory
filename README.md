@@ -163,13 +163,13 @@ gui-agent-memory/
 #### 🔧 开发时快速格式化（主动修复）
 ```bash
 # 格式化代码（直接修改文件）
-uv run ruff format gui_agent_memory tests
+uv run ruff format src tests
 
 # 修复代码问题（导入排序、代码风格等）
-uv run ruff check --fix gui_agent_memory tests
+uv run ruff check --fix src tests
 
 # 类型检查（仅检查，不修改）
-uv run mypy gui_agent_memory tests
+uv run mypy src tests
 
 # 执行所有的测试代码
 uv run pytest

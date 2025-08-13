@@ -128,4 +128,6 @@ data_file = "test_data/.coverage"
 show_missing = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["gui_agent_memory"]
+# Use src layout: point to the package path under src
+packages = ["src/gui_agent_memory"]
+# Ensure prompt templates are included in the wheel

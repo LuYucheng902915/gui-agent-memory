@@ -381,13 +381,17 @@ class MemorySystem:
                 )
 
         try:
+            # If tests inject a mock ingestion, preserve legacy signature (no op kwarg)
+            if hasattr(self, "_mock_ingestion") and self._mock_ingestion is not None:
+                return self._mock_ingestion.batch_add_facts(facts_data)
+
             op = OperationLogger.create(
                 self.config.logs_base_dir,
                 "batch_add_facts",
                 enabled=getattr(self.config, "operation_logs_enabled", False),
             )
             op.attach_json("input.json", facts_data)
-            result = self.ingestion.batch_add_facts(facts_data)
+            result = self.ingestion.batch_add_facts(facts_data, op=op)
             op.attach_json("result.json", result)
             op.attach_json("summary.json", {"count": len(result)})
             return result

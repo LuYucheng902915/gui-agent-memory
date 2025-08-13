@@ -601,6 +601,12 @@ class MemoryIngestion:
                 except Exception as exc:
                     self.logger.warning("Fingerprint dedupe failed (fact): %s", exc)
 
+            # If fingerprint dedup didn't short-circuit, proceed; ensure out_fp computed
+            if out_fp is None and callable(compute_method):
+                try:
+                    out_fp = compute_method(fact)
+                except Exception:
+                    out_fp = None
             embedding = self._generate_embedding(fact.content)
             top_id, sim = self._top1_similarity_fact(embedding)
             threshold = getattr(self.config, "similarity_threshold_judge", 0.90)
@@ -1328,14 +1334,17 @@ class MemoryIngestion:
                 )
             op.attach_json("input.json", facts_data)
 
-            # Simple batch: just多次调用 add_fact（保持与 add_fact 完全一致的流程与返回格式）
+            # Simple batch: route through single entry with op child per item
             success_msgs: list[str] = []
-            for fact_data in facts_data:
+            for idx, fact_data in enumerate(facts_data, start=1):
+                item_op = op.child(f"item_{idx:03d}")
                 msg = self.add_fact(
                     content=fact_data["content"],
                     keywords=fact_data.get("keywords", []),
                     source=fact_data.get("source", "batch_import"),
                 )
+                # Mirror per-item message for quick glance
+                item_op.attach_text("result.txt", msg)
                 success_msgs.append(msg)
             op.attach_json(
                 "summary.json", {"added": len(success_msgs), "total": len(facts_data)}
