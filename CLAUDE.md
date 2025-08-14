@@ -185,3 +185,5 @@ EXPERIENCE_LLM_BASE_URL="<your-experience-llm-base-url>"
 EXPERIENCE_LLM_API_KEY="<your-experience-llm-api-key>"
 ```
 The `config.py` module implements a "fail-fast" strategy, raising a `ConfigurationError` if any required environment variable is missing.
+
+异常处理顶层采用 catch-all，内层精确捕获或者让错误向上传递，不使用 catch-all。

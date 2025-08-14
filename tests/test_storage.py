@@ -114,7 +114,7 @@ class TestMemoryStorage:
             "distances": [[0.1, 0.2]],
         }
 
-        result = storage.query_experiences(query_texts=["test"], n_results=2)
+        result = storage.query_experiences(query_texts=["test"], top_k=2)
 
         assert "ids" in result
         assert "documents" in result
@@ -138,7 +138,7 @@ class TestMemoryStorage:
             "distances": [[0.1, 0.2]],
         }
 
-        result = storage.query_facts(query_texts=["test"], n_results=2)
+        result = storage.query_facts(query_texts=["test"], top_k=2)
 
         assert "ids" in result
         assert "documents" in result
@@ -336,7 +336,7 @@ class TestMemoryStorageAdvanced:
         mock_chroma_collection.query.side_effect = Exception("ChromaDB error")
 
         with pytest.raises(StorageError) as exc_info:
-            storage.query_experiences(query_texts=["test"], n_results=2)
+            storage.query_experiences(query_texts=["test"], top_k=2)
 
         assert "Failed to query experiences from ChromaDB" in str(exc_info.value)
 
@@ -353,7 +353,7 @@ class TestMemoryStorageAdvanced:
         mock_chroma_collection.query.side_effect = Exception("ChromaDB error")
 
         with pytest.raises(StorageError) as exc_info:
-            storage.query_facts(query_texts=["test"], n_results=2)
+            storage.query_facts(query_texts=["test"], top_k=2)
 
         assert "Failed to query facts from ChromaDB" in str(exc_info.value)
 
@@ -519,7 +519,7 @@ class TestMemoryStorageAdvanced:
 
         # Test with both query_embeddings and query_texts
         result = storage.query_experiences(
-            query_embeddings=[[0.1, 0.2, 0.3]], query_texts=["test"], n_results=1
+            query_embeddings=[[0.1, 0.2, 0.3]], query_texts=["test"], top_k=1
         )
 
         assert "ids" in result
@@ -546,7 +546,7 @@ class TestMemoryStorageAdvanced:
 
         # Test with both query_embeddings and query_texts
         result = storage.query_facts(
-            query_embeddings=[[0.1, 0.2, 0.3]], query_texts=["test"], n_results=1
+            query_embeddings=[[0.1, 0.2, 0.3]], query_texts=["test"], top_k=1
         )
 
         assert "ids" in result
@@ -572,7 +572,7 @@ class TestMemoryStorageAdvanced:
         # Test with where clause
         where_clause = {"field": "value"}
         result = storage.query_experiences(
-            query_texts=["test"], where=where_clause, n_results=1
+            query_texts=["test"], where=where_clause, top_k=1
         )
 
         assert "ids" in result

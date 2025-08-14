@@ -7,7 +7,7 @@ This module defines the core data structures for both types of memories:
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -125,4 +125,78 @@ class LearningRequest(BaseModel):
     )
     task_description: str = Field(
         default="", description="Optional description of the task being learned"
+    )
+
+
+class UpsertResult(BaseModel):
+    """
+    Fixed-shape result model for upsert operations.
+
+    - result: the decision taken by the ingestion policy
+    - the rest fields are optional but always present in schema for stability
+    - details: bag for rare/diagnostic fields without breaking the schema
+    """
+
+    result: Literal[
+        "added_new",
+        "discarded_by_fingerprint",
+        "updated_existing",
+        "kept_new_deleted_old",
+        "kept_old_discarded_new",
+    ]
+    new_record_id: str | None = None
+    top_id: str | None = None
+    similarity: float | None = None
+    threshold: float | None = None
+    invoked_judge: bool | None = None
+    judge_decision: str | None = None
+    judge_log_dir: str | None = None
+    fingerprint_discarded: bool | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {
+        "extra": "forbid",
+    }
+
+
+class AddFactResponse(BaseModel):
+    """
+    Public API response for adding a fact.
+
+    Stable schema for external callers/UI with a success indicator and
+    normalized fields mapped from UpsertResult.
+    """
+
+    success: bool
+    result: Literal[
+        "added_new",
+        "discarded_by_fingerprint",
+        "updated_existing",
+        "kept_new_deleted_old",
+        "kept_old_discarded_new",
+    ]
+    message: str
+    record_id: str | None = None
+    fingerprint_hit: bool | None = None
+    judge_invoked: bool | None = None
+    judge_decision: str | None = None
+    similarity: float | None = None
+    threshold: float | None = None
+    log_dir: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class StoredFact(BaseModel):
+    """
+    Canonical shape of a fact record as it is persisted in the vector store.
+
+    Returned by low-level storage APIs after a successful write so that callers
+    can log exactly what was stored (id, document and sanitized metadata).
+    """
+
+    record_id: str
+    document: str
+    metadata: dict[str, Any]
+    embedding: list[float] = Field(
+        default_factory=list, description="Embedding vector stored alongside the record"
     )

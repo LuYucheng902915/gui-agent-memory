@@ -38,7 +38,7 @@ def demonstrate_system_initialization_and_validation():
         memory = MemorySystem()
         print("✅ 记忆系统初始化成功")
         try:
-            print("🧩 当前配置(去敏):", get_config().debug_dump())
+            print("🧩 当前配置(去敏):", memory.config.debug_dump())
         except Exception as e:
             print(f"🧩 配置快照输出失败: {e}")
 
@@ -80,19 +80,17 @@ def demonstrate_fact_management(memory: MemorySystem):
     # 1. 添加单个事实
     print_subsection("添加单个事实")
     try:
-        fact_result = memory.add_fact(
+        resp = memory.add_fact(
             content="VS Code是Microsoft开发的免费源代码编辑器，支持多种编程语言和扩展",
-            keywords=["VS Code", "Microsoft", "编辑器", "编程"],
-            source="demo_knowledge_base",
+            keywords=[],
+            source="demo_知识库" if False else "demo_knowledge_base",
         )
-        if isinstance(fact_result, str) and "already exists" in fact_result.lower():
-            print(f"🔁 事实已存在，跳过: {fact_result}")
-        elif isinstance(fact_result, str) and (
-            fact_result.startswith("Successfully added fact") or "成功" in fact_result
-        ):
-            print(f"✅ 成功添加事实: {fact_result}")
+        if resp.success:
+            print(f"✅ 成功添加事实: id={resp.record_id} result={resp.result}")
         else:
-            print(f"ℹ️ 添加事实结果: {fact_result}")
+            print(
+                f"ℹ️ 添加事实结果: result={resp.result} fingerprint_hit={resp.fingerprint_hit}"
+            )
     except Exception as e:
         print(f"❌ 添加事实失败: {e}")
 

@@ -11,6 +11,8 @@ This module handles:
 import hashlib
 import json
 import logging
+import re
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, cast
@@ -20,7 +22,7 @@ from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 
 from .config import MemoryConfig, get_config
-from .models import ActionStep, ExperienceRecord, FactRecord
+from .models import ActionStep, ExperienceRecord, FactRecord, StoredFact
 
 # Note: SQLite compatibility shim is handled once in gui_agent_memory/__init__.py
 
@@ -92,10 +94,20 @@ class MemoryStorage:
     # Internal helpers (DRY utilities)
     # ---------------------------------
     def _normalize_text(self, text: str) -> str:
-        """Normalize text: trim and collapse internal whitespace."""
-        if text is None:
+        """Deep normalization for fingerprints and stable comparisons.
+
+        Steps:
+        - Convert to string, strip leading/trailing whitespace
+        - Lowercase
+        - NFKC normalize (full-width to half-width, compatibility forms)
+        - Remove non-word punctuation but preserve common semantic symbols: - _ . / : + #
+        - Collapse consecutive whitespace to a single space
+        """
+        if not isinstance(text, str) or not text:
             return ""
-        return " ".join(str(text).strip().split())
+        s = unicodedata.normalize("NFKC", text.strip()).lower()
+        s = re.sub(r"[^\w\s\-\._/:+#]", " ", s, flags=re.UNICODE)
+        return " ".join(s.split())
 
     def _normalize_keywords(self, keywords: list[str] | None) -> list[str]:
         """Normalize keywords: lower, trim, de-duplicate, sort for stability."""
@@ -244,16 +256,47 @@ class MemoryStorage:
                 # Best-effort: keep original as string
                 metadata["last_used_at"] = str(value)
 
-        # keywords: list -> comma-separated string
+        # keywords: normalize into a human-readable string and boolean flags for filtering
         if "keywords" in metadata and isinstance(metadata["keywords"], list):
-            metadata["keywords"] = ",".join([str(k) for k in metadata["keywords"]])
+            try:
+                raw_list = [str(k) for k in metadata["keywords"]]
+            except Exception:
+                raw_list = []
+            # Normalize and lowercase tokens
+            norm_tokens: list[str] = []
+            for k in raw_list:
+                token = self._normalize_text(k).lower()
+                if token:
+                    norm_tokens.append(token)
+            # De-duplicate while preserving order
+            seen = set()
+            unique_tokens: list[str] = []
+            for t in norm_tokens:
+                if t not in seen:
+                    seen.add(t)
+                    unique_tokens.append(t)
+            # Replace list with comma-separated keywords for readability
+            metadata["keywords"] = ",".join(unique_tokens)
+
+            # Add boolean flags kw_<slug>=True for precise filtering
+            def _slug(text: str) -> str:
+                s = unicodedata.normalize("NFKC", text)
+                s = re.sub(r"\s+", "_", s)
+                s = re.sub(r"[^\w]", "_", s, flags=re.UNICODE)
+                return s.strip("_")
+
+            for token in unique_tokens:
+                slug = _slug(token)
+                if slug:
+                    metadata[f"kw_{slug}"] = True
 
         # Filter to Chroma-supported primitive types and drop None values
-        clean_metadata: dict[str, Any] = {
-            k: v
-            for k, v in metadata.items()
-            if v is not None and isinstance(v, str | int | float | bool)
-        }
+        clean_metadata: dict[str, Any] = {}
+        for k, v in metadata.items():
+            if v is None:
+                continue
+            if isinstance(v, str | int | float | bool):
+                clean_metadata[k] = v
         return clean_metadata
 
     def _prepare_experience_record(
@@ -470,34 +513,118 @@ class MemoryStorage:
         except Exception as e:
             raise StorageError(f"Failed to add facts to ChromaDB: {e}") from e
 
+    def add_fact(
+        self,
+        fact: FactRecord,
+        embedding: list[float],
+        *,
+        input_fp: str | None = None,
+        output_fp: str | None = None,
+    ) -> StoredFact:
+        """
+        Add a single fact record to the declarative memories collection.
+
+        This method performs no de-duplication or existence checks. The caller is
+        responsible for enforcing any idempotency or uniqueness policies.
+
+        Args:
+            fact: The fact record to add
+            embedding: The embedding vector corresponding to the fact content
+            input_fp: Optional input fingerprint to attach in metadata
+            output_fp: Optional output fingerprint to attach in metadata
+
+        Returns:
+            StoredFact: The canonical persisted shape (id, document, metadata)
+
+        Raises:
+            StorageError: If storage operation fails
+        """
+        try:
+            record_id, document, metadata = self._prepare_fact_record(
+                fact, index=0, output_fp=output_fp
+            )
+            if input_fp is not None:
+                metadata["input_fp"] = input_fp
+
+            self.declarative_collection.add(
+                ids=[record_id],
+                documents=[document],
+                metadatas=[metadata],
+                embeddings=[embedding],
+            )
+            return StoredFact(
+                record_id=record_id,
+                document=document,
+                metadata=metadata,
+                embedding=embedding,
+            )
+        except Exception as e:
+            raise StorageError(f"Failed to add fact to ChromaDB: {e}") from e
+
     def query_experiences(
         self,
         query_embeddings: list[list[float]] | None = None,
         query_texts: list[str] | None = None,
         where: dict[str, Any] | None = None,
-        n_results: int = 10,
+        top_k: int | None = None,
     ) -> dict[str, list[Any]]:
         """
-        Query the experiential memories collection.
+        Perform a batched semantic search on the experiential memories collection,
+        with optional metadata pre-filtering.
+
+        This method is a high-level interface to the underlying vector database,
+        supporting both pure vector search and hybrid "filter-then-search" queries.
 
         Args:
-            query_embeddings: List of query embedding vectors
-            query_texts: List of query texts (alternative to embeddings)
-            where: Metadata filter conditions
-            n_results: Maximum number of results to return
+            query_embeddings: A list of query vectors (preferred). Supports passing
+                k queries at once; each query returns up to top_k items. If provided
+                together with `query_texts`, `query_texts` will be ignored to enforce
+                a unified embedding model.
+            query_texts: A list of query texts. NOT RECOMMENDED for this system.
+                Using this bypasses the configured embedding model in favor of
+                Chroma's default, which may lead to inconsistent results.
+            where: Metadata filter to apply before the vector search (pre-filter).
+                This limits the candidate set then performs vector similarity inside
+                the filtered subset.
+            top_k: Maximum number of results to return per query. If None, falls
+                back to config.default_top_k.
 
         Returns:
-            Dictionary containing query results
+            Dictionary of query results from ChromaDB. For k queries and top_k = N,
+            results are grouped per query (k groups, each up to N results). Returns
+            include ids, documents, metadatas, distances, and embeddings (as requested
+            via include parameters).
 
         Raises:
-            StorageError: If query operation fails
+            StorageError: If the query operation fails.
+
+        Notes:
+            - query_texts is discouraged; pre-embed using the configured model and
+              pass via query_embeddings for consistency.
+            - where is best for very large datasets with controlled metadata. For
+              small datasets where keywords are LLM-generated and may be noisy,
+              avoid where pre-filtering as it can harm recall and overall retrieval
+              effectiveness.
         """
         try:
+            # Enforce unified embedding model by ignoring query_texts when embeddings are provided
+            if query_embeddings and query_texts:
+                self.logger.warning(
+                    "Both query_embeddings and query_texts provided; ignoring query_texts to enforce unified embedding model."
+                )
+                query_texts = None
+            elif query_texts:
+                # Soft deprecation notice
+                self.logger.warning(
+                    "query_texts is discouraged; pre-embed using the configured model and pass via query_embeddings for consistency."
+                )
+
+            topk = top_k if top_k is not None else self.config.default_top_k
             result = self.experiential_collection.query(
                 query_embeddings=query_embeddings,
                 query_texts=query_texts,
                 where=where,
-                n_results=n_results,
+                n_results=topk,
                 include=["documents", "metadatas", "distances", "embeddings"],
             )
             return cast(dict[str, list[Any]], result)
@@ -509,29 +636,65 @@ class MemoryStorage:
         query_embeddings: list[list[float]] | None = None,
         query_texts: list[str] | None = None,
         where: dict[str, Any] | None = None,
-        n_results: int = 10,
+        top_k: int | None = None,
     ) -> dict[str, list[Any]]:
         """
-        Query the declarative memories collection.
+        Perform a batched semantic search on the declarative memories collection,
+        with optional metadata pre-filtering.
+
+        This method is a high-level interface to the underlying vector database,
+        supporting both pure vector search and hybrid "filter-then-search" queries.
 
         Args:
-            query_embeddings: List of query embedding vectors
-            query_texts: List of query texts (alternative to embeddings)
-            where: Metadata filter conditions
-            n_results: Maximum number of results to return
+            query_embeddings: A list of query vectors (preferred). Supports passing
+                k queries at once; each query returns up to top_k items. If provided
+                together with `query_texts`, `query_texts` will be ignored to enforce
+                a unified embedding model.
+            query_texts: A list of query texts. NOT RECOMMENDED for this system.
+                Using this bypasses the configured embedding model in favor of
+                Chroma's default, which may lead to inconsistent results.
+            where: Metadata filter to apply before the vector search (pre-filter).
+                This limits the candidate set then performs vector similarity inside
+                the filtered subset.
+            top_k: The maximum number of results to return per query. If None,
+                falls back to config.default_top_k.
 
         Returns:
-            Dictionary containing query results
+            A dictionary containing the query results from ChromaDB, including
+            ids, documents, metadatas, distances, and embeddings (as requested via
+            include parameters). For k queries and top_k = N, results are grouped
+            per query (k groups, each up to N results).
 
         Raises:
-            StorageError: If query operation fails
+            StorageError: If the query operation fails.
+
+        Notes:
+            - query_texts is discouraged; pre-embed using the configured model and
+              pass via query_embeddings for consistency.
+            - where is best for very large datasets with controlled metadata. For
+              small datasets where keywords are LLM-generated and may be noisy,
+              avoid where pre-filtering as it can harm recall and overall retrieval
+              effectiveness.
         """
         try:
+            # Enforce unified embedding model by ignoring query_texts when embeddings are provided
+            if query_embeddings and query_texts:
+                self.logger.warning(
+                    "Both query_embeddings and query_texts provided; ignoring query_texts to enforce unified embedding model."
+                )
+                query_texts = None
+            elif query_texts:
+                # Soft deprecation notice
+                self.logger.warning(
+                    "query_texts is discouraged; pre-embed using the configured model and pass via query_embeddings for consistency."
+                )
+
+            topk = top_k if top_k is not None else self.config.default_top_k
             result = self.declarative_collection.query(
                 query_embeddings=query_embeddings,
                 query_texts=query_texts,
                 where=where,
-                n_results=n_results,
+                n_results=topk,
                 include=["documents", "metadatas", "distances", "embeddings"],
             )
             return cast(dict[str, list[Any]], result)
@@ -726,11 +889,19 @@ class MemoryStorage:
             if len(ids) <= 2:
                 for record_id in ids:
                     result = collection.get(ids=[record_id], include=["metadatas"])
-                    if not result.get("metadatas"):
-                        # No metadata present; skip
+                    metadatas_any = result.get("metadatas")
+                    # If no metadata list or it's empty, skip updating this record
+                    if metadatas_any is None or (
+                        isinstance(metadatas_any, list) and len(metadatas_any) == 0
+                    ):
                         continue
+                    first_meta_any = (
+                        metadatas_any[0]
+                        if isinstance(metadatas_any, list)
+                        else metadatas_any
+                    )
                     base_meta = (
-                        dict(result["metadatas"][0]) if result["metadatas"][0] else {}
+                        dict(first_meta_any) if isinstance(first_meta_any, dict) else {}
                     )
                     count_value2 = base_meta.get("usage_count", 0)
                     try:

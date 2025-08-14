@@ -17,7 +17,13 @@ from .log_utils import (
     write_json_file,
     write_text_file,
 )
-from .models import ExperienceRecord, FactRecord, RetrievalResult
+from .models import (
+    AddFactResponse,
+    ExperienceRecord,
+    FactRecord,
+    RetrievalResult,
+    UpsertResult,
+)
 from .retriever import MemoryRetriever, RetrievalError
 from .storage import MemoryStorage, StorageError
 
@@ -64,7 +70,7 @@ class MemorySystem:
             root_logger = logging.getLogger()
             if not root_logger.handlers:
                 # Map LogLevel enum to logging module level
-                level_name = str(getattr(self.config, "log_level", "INFO"))
+                level_name = str(self.config.log_level)
                 level = getattr(logging, level_name, logging.INFO)
                 root_logger.setLevel(level)
                 handler = logging.StreamHandler()
@@ -115,9 +121,9 @@ class MemorySystem:
         try:
             op = OperationLogger.create(
                 self.config.logs_base_dir,
-                "retrieve",
+                "retrieve_memories",
                 query[:48],
-                enabled=getattr(self.config, "operation_logs_enabled", False),
+                enabled=self.config.operation_logs_enabled,
             )
             op.attach_text("input.txt", query)
             op.attach_json("params.json", {"top_n": top_n})
@@ -136,6 +142,8 @@ class MemorySystem:
             op.attach_json("result.json", result)
             return result
         except RetrievalError as e:
+            raise MemorySystemError(f"Memory retrieval failed: {e}") from e
+        except Exception as e:
             raise MemorySystemError(f"Memory retrieval failed: {e}") from e
 
     def learn_from_task(
@@ -190,7 +198,7 @@ class MemorySystem:
                 self.config.logs_base_dir,
                 "learn_from_task",
                 safe_slug(source_task_id),
-                enabled=getattr(self.config, "operation_logs_enabled", False),
+                enabled=self.config.operation_logs_enabled,
             )
             op.attach_json(
                 "input.json",
@@ -215,6 +223,8 @@ class MemorySystem:
             return result
         except IngestionError as e:
             raise MemorySystemError(f"Learning from task failed: {e}") from e
+        except Exception as e:
+            raise MemorySystemError(f"Learning from task failed: {e}") from e
 
     def add_experience(self, experience: ExperienceRecord) -> str:
         """
@@ -227,7 +237,7 @@ class MemorySystem:
             experience: Complete experience record to add
 
         Returns:
-            Success message with record ID
+            str: Success message with record ID
 
         Raises:
             MemorySystemError: If adding experience fails
@@ -260,7 +270,7 @@ class MemorySystem:
                     self.config.logs_base_dir,
                     "add_experience",
                     safe_slug(experience.source_task_id),
-                    enabled=getattr(self.config, "operation_logs_enabled", False),
+                    enabled=self.config.operation_logs_enabled,
                 )
                 return self._mock_ingestion.add_experience(experience, op=op)
 
@@ -268,7 +278,7 @@ class MemorySystem:
                 self.config.logs_base_dir,
                 "add_experience",
                 safe_slug(experience.source_task_id),
-                enabled=getattr(self.config, "operation_logs_enabled", False),
+                enabled=self.config.operation_logs_enabled,
             )
             op.attach_json("input.json", experience)
             result = self.ingestion.add_experience(experience, op=op)
@@ -280,10 +290,12 @@ class MemorySystem:
             return result
         except IngestionError as e:
             raise MemorySystemError(f"Adding experience failed: {e}") from e
+        except Exception as e:
+            raise MemorySystemError(f"Adding experience failed: {e}") from e
 
     def add_fact(
         self, content: str, keywords: list[str], source: str = "manual"
-    ) -> str:
+    ) -> AddFactResponse:
         """
         Add a semantic fact to the knowledge base.
 
@@ -293,67 +305,95 @@ class MemorySystem:
             source: Source of this knowledge (default: "manual")
 
         Returns:
-            Success message with record ID
+            AddFactResponse: Structured result with stable fields such as
+            success/result/record_id
 
         Raises:
             MemorySystemError: If adding fact fails
 
         Example:
             >>> memory_system = MemorySystem()
-            >>> result = memory_system.add_fact(
+            >>> resp = memory_system.add_fact(
             ...     content="Chrome browser stores passwords in the password manager",
             ...     keywords=["chrome", "password", "security", "browser"],
             ...     source="documentation"
             ... )
-            >>> print(result)
+            >>> print(resp.success, resp.result, resp.record_id)
         """
         if not content or not content.strip():
             raise MemorySystemError("Fact content cannot be empty")
 
-        if not keywords:
-            keywords = []
+        # Normalize keywords to a list
+        keywords = keywords or []
+
+        # Prepare operation logger outside try for clearer structure
+        op = OperationLogger.create(
+            self.config.logs_base_dir,
+            "add_fact",
+            enabled=self.config.operation_logs_enabled,
+        )
+        op.attach_json(
+            "input.json", {"content": content, "keywords": keywords, "source": source}
+        )
 
         try:
-            # For tests that inject a mock ingestion, preserve old signature behavior
-            if hasattr(self, "_mock_ingestion") and self._mock_ingestion is not None:
-                return self._mock_ingestion.add_fact(content, keywords, source)
-            # If tests replaced ingestion with a Mock expecting the old method, honor it
-            if (
-                hasattr(self, "ingestion")
-                and getattr(self.ingestion, "__class__", type(None)).__name__
-                in {"Mock", "MagicMock"}
-                and hasattr(self.ingestion, "add_fact")
-            ):
-                return self.ingestion.add_fact(content, keywords, source)
-
-            # Route all real calls through similarity policy (dedupe → threshold → judge)
-            op = OperationLogger.create(
-                self.config.logs_base_dir,
-                "add_fact",
-                enabled=getattr(self.config, "operation_logs_enabled", False),
-            )
-            op.attach_json(
-                "input.json",
-                {"content": content, "keywords": keywords, "source": source},
-            )
-
+            # Build record and route through unified upsert policy
             fact = FactRecord(content=content, keywords=keywords, source=source)
-            dbg = self.ingestion.upsert_fact_with_policy(fact, op=op)
-            op.attach_json("debug.json", dbg)
+            upsert_result = self.ingestion.upsert_fact_with_policy(fact, op=op)
 
-            # Compose user-facing message consistent with previous behavior
-            rid = dbg.get("new_record_id")
-            msg = (
-                f"Successfully added fact. Record ID: {rid}"
-                if rid
-                else "Successfully added fact."
-            )
+            # Map internal upsert result to public response
+            response = self._map_upsert_to_response(upsert_result)
 
-            op.attach_text("result.txt", msg)
-            op.attach_json("summary.json", {"status": "success"})
-            return msg
+            # Persist and return
+            op.attach_json("result.json", response.model_dump())
+            op.attach_text("summary.txt", response.message)
+            return response
         except IngestionError as e:
+            # Unified error wrapping
             raise MemorySystemError(f"Adding fact failed: {e}") from e
+        except Exception as e:
+            # Catch-all for unexpected errors
+            raise MemorySystemError(
+                f"An unexpected error occurred while adding fact: {e}"
+            ) from e
+
+    def _compose_fact_message(self, result: str) -> str:
+        if result == "added_new":
+            return "Successfully added fact."
+        if result == "discarded_by_fingerprint":
+            return "New fact discarded (duplicate content detected)."
+        if result == "updated_existing":
+            return "Successfully updated existing fact."
+        if result == "kept_new_deleted_old":
+            return "Kept new fact and deleted old."
+        if result == "kept_old_discarded_new":
+            return "Kept old fact and discarded new."
+        return "Fact upsert completed."
+
+    def _map_upsert_to_response(self, upsert: UpsertResult) -> AddFactResponse:
+        success = upsert.result in {
+            "added_new",
+            "updated_existing",
+            "kept_new_deleted_old",
+        }
+        message = self._compose_fact_message(upsert.result)
+        return AddFactResponse(
+            success=success,
+            result=upsert.result,
+            message=message,
+            record_id=upsert.new_record_id,
+            fingerprint_hit=True
+            if upsert.result == "discarded_by_fingerprint"
+            else (upsert.fingerprint_discarded or False),
+            judge_invoked=bool(upsert.invoked_judge)
+            if upsert.invoked_judge is not None
+            else None,
+            judge_decision=upsert.judge_decision,
+            similarity=upsert.similarity,
+            threshold=upsert.threshold,
+            log_dir=upsert.judge_log_dir,
+            details=upsert.details or {},
+        )
 
     def batch_add_facts(self, facts_data: list[dict[str, Any]]) -> list[str]:
         """
@@ -403,7 +443,7 @@ class MemorySystem:
             op = OperationLogger.create(
                 self.config.logs_base_dir,
                 "batch_add_facts",
-                enabled=getattr(self.config, "operation_logs_enabled", False),
+                enabled=self.config.operation_logs_enabled,
             )
             op.attach_json("input.json", facts_data)
             result = self.ingestion.batch_add_facts(facts_data, op=op)
@@ -411,6 +451,8 @@ class MemorySystem:
             op.attach_json("summary.json", {"count": len(result)})
             return result
         except IngestionError as e:
+            raise MemorySystemError(f"Batch adding facts failed: {e}") from e
+        except Exception as e:
             raise MemorySystemError(f"Batch adding facts failed: {e}") from e
 
     def get_similar_experiences(
@@ -445,6 +487,8 @@ class MemorySystem:
             return result
         except RetrievalError as e:
             raise MemorySystemError(f"Getting similar experiences failed: {e}") from e
+        except Exception as e:
+            raise MemorySystemError(f"Getting similar experiences failed: {e}") from e
 
     def get_related_facts(
         self, topic: str, top_n: int | None = None
@@ -475,6 +519,8 @@ class MemorySystem:
             write_json_file(op_dir / "result.json", result)
             return result
         except RetrievalError as e:
+            raise MemorySystemError(f"Getting related facts failed: {e}") from e
+        except Exception as e:
             raise MemorySystemError(f"Getting related facts failed: {e}") from e
 
     def get_system_stats(self) -> dict[str, Any]:
@@ -513,6 +559,8 @@ class MemorySystem:
             }
         except StorageError as e:
             raise MemorySystemError(f"Getting system stats failed: {e}") from e
+        except Exception as e:
+            raise MemorySystemError(f"Getting system stats failed: {e}") from e
 
     def validate_system(self) -> bool:
         """
@@ -535,6 +583,8 @@ class MemorySystem:
 
         except (ConfigurationError, StorageError) as e:
             raise MemorySystemError(f"System validation failed: {e}") from e
+        except Exception as e:
+            raise MemorySystemError(f"System validation failed: {e}") from e
 
     def clear_all_memories(self) -> str:
         """
@@ -552,6 +602,8 @@ class MemorySystem:
             self.storage.clear_collections()
             return "Successfully cleared all memories from the system"
         except StorageError as e:
+            raise MemorySystemError(f"Clearing memories failed: {e}") from e
+        except Exception as e:
             raise MemorySystemError(f"Clearing memories failed: {e}") from e
 
 

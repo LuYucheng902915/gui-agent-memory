@@ -17,6 +17,7 @@ import requests
 from pydantic import SecretStr
 
 from .config import MemoryConfig, get_config
+from .log_utils import OperationLogger
 from .models import ActionStep, ExperienceRecord, FactRecord, RetrievalResult
 from .storage import MemoryStorage
 
@@ -60,7 +61,9 @@ class MemoryRetriever:
         try:
             client = self.config.get_embedding_client()
             response = client.embeddings.create(
-                model=self.config.embedding_model, input=query
+                model=self.config.embedding_model,
+                input=query,
+                dimensions=self.config.embedding_dimension,
             )
             return response.data[0].embedding
         except Exception as e:
@@ -182,7 +185,7 @@ class MemoryRetriever:
             result = self.storage.query_experiences(
                 query_texts=None,
                 where=keyword_filter,
-                n_results=50,  # Get a reasonable number for filtering
+                top_k=50,  # Get a reasonable number for filtering
             )
             return result
 
@@ -211,7 +214,7 @@ class MemoryRetriever:
             result = self.storage.query_facts(
                 query_texts=None,
                 where=keyword_filter,
-                n_results=50,  # Get a reasonable number for filtering
+                top_k=50,  # Get a reasonable number for filtering
             )
             return result
 
@@ -234,7 +237,7 @@ class MemoryRetriever:
         """
         try:
             results = self.storage.query_experiences(
-                query_embeddings=[query_embedding], n_results=top_k
+                query_embeddings=[query_embedding], top_k=top_k
             )
 
             # Convert ChromaDB results to standardized format
@@ -292,7 +295,7 @@ class MemoryRetriever:
         """
         try:
             results = self.storage.query_facts(
-                query_embeddings=[query_embedding], n_results=top_k
+                query_embeddings=[query_embedding], top_k=top_k
             )
 
             # Convert ChromaDB results to standardized format
@@ -361,7 +364,7 @@ class MemoryRetriever:
             results = self.storage.query_experiences(
                 query_texts=keywords[:1],  # Use first keyword as query text
                 where=keyword_filter,
-                n_results=top_k,
+                top_k=top_k,
             )
 
             # Convert ChromaDB results to standardized format
@@ -409,7 +412,7 @@ class MemoryRetriever:
             results = self.storage.query_facts(
                 query_texts=keywords[:1],  # Use first keyword as query text
                 where=keyword_filter,
-                n_results=top_k,
+                top_k=top_k,
             )
 
             # Convert ChromaDB results to standardized format
@@ -522,7 +525,7 @@ class MemoryRetriever:
             # Use requests to call the reranker API directly (as per official docs)
 
             # Support both SecretStr and plain str for tests/mocks
-            api_key_obj = getattr(self.config, "reranker_llm_api_key", "")
+            api_key_obj = self.config.reranker_llm_api_key
             api_key = (
                 api_key_obj.get_secret_value()
                 if isinstance(api_key_obj, SecretStr)
@@ -848,7 +851,7 @@ class MemoryRetriever:
         return reranked_experiences, reranked_facts
 
     def retrieve_memories(
-        self, query: str, top_n: int | None = None
+        self, query: str, top_n: int | None = None, op: OperationLogger | None = None
     ) -> RetrievalResult:
         """
         Retrieve relevant memories using hybrid search and reranking.
@@ -866,6 +869,16 @@ class MemoryRetriever:
         try:
             if top_n is None:
                 top_n = self.config.default_top_n
+
+            # Prepare retriever-scoped logger
+            if op is None:
+                op = OperationLogger.create(
+                    self.config.logs_base_dir,
+                    "retrieve_memories",
+                    enabled=self.config.operation_logs_enabled,
+                )
+            ret_op = op.child("retriever")
+            ret_op.attach_json("params.json", {"top_n": top_n, "query": query})
             if top_n <= 0:
                 return RetrievalResult(
                     experiences=[], facts=[], query=query, total_results=0
@@ -885,6 +898,7 @@ class MemoryRetriever:
                 reranked_experiences, reranked_facts
             )
             result.query = query
+            ret_op.attach_json("result.json", result.model_dump())
             return result
 
         except Exception as e:

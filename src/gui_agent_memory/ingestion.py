@@ -21,7 +21,13 @@ import jieba
 
 from .config import get_config
 from .log_utils import OperationLogger
-from .models import ActionStep, ExperienceRecord, FactRecord, LearningRequest
+from .models import (
+    ActionStep,
+    ExperienceRecord,
+    FactRecord,
+    LearningRequest,
+    UpsertResult,
+)
 from .storage import MemoryStorage
 
 # Module-level logger
@@ -51,6 +57,64 @@ class MemoryIngestion:
         self.logger = logging.getLogger(__name__)
         # Load prompt templates
         self._load_prompts()
+
+    # ----------------------------
+    # Private helpers (fact upsert)
+    # ----------------------------
+    def _compute_fact_output_fp_safe(self, fact: FactRecord) -> str | None:
+        """Compute output fingerprint safely; log and return None on failure."""
+        try:
+            return self.storage.compute_fact_output_fp(fact)
+        except Exception as exc:
+            self.logger.warning("Compute output_fp failed: %s", exc)
+            return None
+
+    def _discard_payload(
+        self,
+        *,
+        similarity: float,
+        threshold: float,
+        invoked_judge: bool,
+        judge_decision: str | None,
+        top_id: str | None,
+        similarity_origin: str = "fingerprint",
+    ) -> dict[str, Any]:
+        """Standardized discard result dict for fingerprint hits."""
+        return {
+            "result": "discarded_by_fingerprint",
+            "similarity": similarity,
+            "threshold": threshold,
+            "invoked_judge": invoked_judge,
+            "judge_decision": judge_decision,
+            "top_id": top_id,
+            "fingerprint_discarded": True,
+            "details": {"similarity_origin": similarity_origin},
+        }
+
+    def _discard_if_output_fp_exists(
+        self,
+        *,
+        out_fp: str | None,
+        similarity: float,
+        threshold: float,
+        invoked_judge: bool,
+        judge_decision: str | None,
+        top_id: str | None,
+    ) -> dict[str, Any] | None:
+        """If output_fp exists in storage, return discard payload; else None."""
+        try:
+            if out_fp and self.storage.fact_exists_by_output_fp(out_fp):
+                # Fingerprint match is a definitive equality; mark similarity as 1.0
+                return self._discard_payload(
+                    similarity=1.0,
+                    threshold=threshold,
+                    invoked_judge=invoked_judge,
+                    judge_decision=judge_decision,
+                    top_id=None,
+                )
+        except Exception as exc:
+            self.logger.warning("Output-fp existence check failed: %s", exc)
+        return None
 
     def _load_prompts(self) -> None:
         """Load prompt templates from packaged resources only (robust to patched reads)."""
@@ -160,7 +224,9 @@ class MemoryIngestion:
         try:
             client = self.config.get_embedding_client()
             response = client.embeddings.create(
-                model=self.config.embedding_model, input=text
+                model=self.config.embedding_model,
+                input=text,
+                dimensions=self.config.embedding_dimension,
             )
             return response.data[0].embedding
         except Exception as e:
@@ -206,9 +272,7 @@ class MemoryIngestion:
                 op.attach_text(name, content)
         else:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            base_prompt_dir = Path(
-                getattr(self.config, "prompt_log_dir", "./memory_system/logs/prompts")
-            )
+            base_prompt_dir = Path(self.config.logs_base_dir) / "prompts"
             judge_dir = base_prompt_dir / f"judge_{ts}"
             judge_dir.mkdir(parents=True, exist_ok=True)
 
@@ -281,65 +345,26 @@ class MemoryIngestion:
         self, embedding: list[float]
     ) -> tuple[str | None, float]:
         try:
-            res = self.storage.query_experiences(
-                query_embeddings=[embedding], n_results=1
-            )
+            res = self.storage.query_experiences(query_embeddings=[embedding], top_k=1)
             ids = res.get("ids", [[]])[0] if res else []
             distances = res.get("distances", [[]])[0] if res else []
             top_id = ids[0] if ids else None
-            # Prefer distance from Chroma; fallback to cosine on returned embeddings
             sim = self._cosine_similarity_from_distance(
                 distances[0] if distances else None
             )
-            if (not distances or len(distances) == 0) and res:
-                embs = res.get("embeddings", [[]])[0] if res.get("embeddings") else []
-                if embs and len(embs) > 0:
-                    try:
-                        import math
-
-                        a = embedding
-                        b = embs[0]
-                        dot = sum(
-                            float(x) * float(y) for x, y in zip(a, b, strict=False)
-                        )
-                        na = math.sqrt(sum(float(x) * float(x) for x in a))
-                        nb = math.sqrt(sum(float(y) * float(y) for y in b))
-                        if na > 0 and nb > 0:
-                            sim = max(0.0, min(1.0, float(dot) / (na * nb)))
-                    except Exception:
-                        sim = sim
             return top_id, sim
         except Exception:
             return None, 0.0
 
     def _top1_similarity_fact(self, embedding: list[float]) -> tuple[str | None, float]:
         try:
-            res = self.storage.query_facts(query_embeddings=[embedding], n_results=1)
+            res = self.storage.query_facts(query_embeddings=[embedding], top_k=1)
             ids = res.get("ids", [[]])[0] if res else []
             distances = res.get("distances", [[]])[0] if res else []
             top_id = ids[0] if ids else None
-            # Prefer distances; fallback to cosine similarity using returned embeddings
-            if distances and len(distances) > 0:
-                sim = self._cosine_similarity_from_distance(distances[0])
-            else:
-                sim = 0.0
-                if res and res.get("embeddings"):
-                    try:
-                        import math
-
-                        embs = res.get("embeddings", [[]])[0]
-                        if embs and len(embs) > 0:
-                            a = embedding
-                            b = embs[0]
-                            dot = sum(
-                                float(x) * float(y) for x, y in zip(a, b, strict=False)
-                            )
-                            na = math.sqrt(sum(float(x) * float(x) for x in a))
-                            nb = math.sqrt(sum(float(y) * float(y) for y in b))
-                            if na > 0 and nb > 0:
-                                sim = max(0.0, min(1.0, float(dot) / (na * nb)))
-                    except Exception:
-                        sim = 0.0
+            sim = self._cosine_similarity_from_distance(
+                distances[0] if distances else None
+            )
             return top_id, sim
         except Exception:
             return None, 0.0
@@ -505,77 +530,115 @@ class MemoryIngestion:
 
     def upsert_fact_with_policy(
         self, fact: FactRecord, op: OperationLogger | None = None
-    ) -> dict[str, Any]:
+    ) -> UpsertResult:
         try:
+            # Establish ingestion-scoped logger directory under the operation
             if op is None:
                 op = OperationLogger.create(
-                    getattr(self.config, "logs_base_dir", "./memory_system/logs"),
-                    "add_fact",
-                    enabled=getattr(self.config, "operation_logs_enabled", True),
+                    self.config.logs_base_dir,
+                    "upsert_fact",
+                    enabled=self.config.operation_logs_enabled,
                 )
-            # Input artifact
-            op.attach_json("input.json", fact.model_dump())
-            # Safe fingerprint dedupe with Mock guards
-            out_fp: Any = None
-            compute_method = getattr(self.storage, "compute_fact_output_fp", None)
-            if callable(compute_method) and compute_method.__class__.__name__ not in {
-                "Mock",
-                "MagicMock",
-            }:
-                try:
-                    out_fp = compute_method(fact)
-                except Exception:
-                    out_fp = None
-            exists_method = getattr(self.storage, "fact_exists_by_output_fp", None)
-            if (
-                out_fp
-                and callable(exists_method)
-                and exists_method.__class__.__name__ not in {"Mock", "MagicMock"}
-            ):
-                try:
-                    if bool(exists_method(out_fp)):
-                        return {
-                            "result": "discarded_by_fingerprint",
-                            "similarity": 0.0,
-                            "threshold": getattr(
-                                self.config, "similarity_threshold_judge", 0.90
-                            ),
-                            "invoked_judge": False,
-                            "judge_decision": None,
-                            "top_id": None,
-                            "fingerprint_discarded": True,
-                        }
-                except Exception as exc:
-                    self.logger.warning("Fingerprint dedupe failed (fact): %s", exc)
+            ing_op = op.child("ingestion")
+            # Input artifact at ingestion level
+            ing_op.attach_json("input.json", fact.model_dump())
+            # Prepare threshold early for consistent payloads
+            threshold = self.config.similarity_threshold_judge
 
-            # If fingerprint dedup didn't short-circuit, proceed; ensure out_fp computed
-            if out_fp is None and callable(compute_method):
-                try:
-                    out_fp = compute_method(fact)
-                except Exception:
-                    out_fp = None
+            # 1) Output fingerprint dedupe (early exit)
+            out_fp: Any = self._compute_fact_output_fp_safe(fact)
+            # Log computed fingerprint before dedupe under ingestion/fingerprint/
+            fp_op = ing_op.child("fingerprint")
+            fp_op.attach_json(
+                "pre_dedupe.json",
+                {"output_fp": out_fp, "phase": "pre_dedupe"},
+            )
+            pre_dedupe_result = self._discard_if_output_fp_exists(
+                out_fp=out_fp,
+                similarity=0.0,
+                threshold=threshold,
+                invoked_judge=False,
+                judge_decision=None,
+                top_id=None,
+            )
+            # Log pre-dedupe check result (hit or miss)
+            fp_op.attach_json(
+                "pre_dedupe_check.json",
+                {
+                    "output_fp": out_fp,
+                    "dedupe_hit": bool(pre_dedupe_result),
+                    "phase": "pre_dedupe",
+                },
+            )
+            if pre_dedupe_result is not None:
+                # Mark dedupe hit
+                ing_op.attach_json("debug.json", pre_dedupe_result)
+                return UpsertResult(**pre_dedupe_result)
+
+            # Keyword generation after fingerprint check, before embedding
+            try:
+                if not fact.keywords:
+                    keyword_op = ing_op.child("keyword")
+                    extracted = self._extract_keywords_with_llm(
+                        fact.content, op=keyword_op
+                    )
+                    fact.keywords = list(extracted)[:10] if extracted else []
+            except Exception as kw_exc:
+                self.logger.warning(
+                    "Keyword generation failed, continue without: %s", kw_exc
+                )
+
             embedding = self._generate_embedding(fact.content)
+            # --- embedding logging (preview + stats) ---
+            try:
+                emb_op = ing_op.child("embedding")
+                preview = [
+                    round(float(x), 6) for x in (embedding[:64] if embedding else [])
+                ]
+                stats = {
+                    "dim": len(embedding),
+                    "min": round(float(min(embedding)), 6) if embedding else None,
+                    "max": round(float(max(embedding)), 6) if embedding else None,
+                    "mean": round(float(sum(embedding)) / len(embedding), 6)
+                    if embedding
+                    else None,
+                }
+                emb_op.attach_json(
+                    "embedding_preview.json", {"stats": stats, "preview": preview}
+                )
+            except Exception as emb_log_exc:
+                self.logger.warning("Failed to log embedding preview: %s", emb_log_exc)
             top_id, sim = self._top1_similarity_fact(embedding)
-            threshold = getattr(self.config, "similarity_threshold_judge", 0.90)
 
             if top_id is None or sim < threshold:
                 # safety re-check before add
-                try:
-                    if out_fp and self.storage.fact_exists_by_output_fp(out_fp):
-                        return {
-                            "result": "discarded_by_fingerprint",
-                            "similarity": sim,
-                            "threshold": threshold,
-                            "invoked_judge": False,
-                            "judge_decision": None,
-                            "top_id": top_id,
-                            "fingerprint_discarded": True,
-                        }
-                except Exception as exc:
-                    self.logger.warning("Output-fp recheck before add failed: %s", exc)
-                record_ids = self.storage.add_facts(
-                    [fact], [embedding], output_fps=[out_fp]
+                pre_add_check_result = self._discard_if_output_fp_exists(
+                    out_fp=out_fp,
+                    similarity=sim,
+                    threshold=threshold,
+                    invoked_judge=False,
+                    judge_decision=None,
+                    top_id=top_id,
                 )
+                # Always log pre-add check result
+                fp_op.attach_json(
+                    "pre_add_check.json",
+                    {
+                        "output_fp": out_fp,
+                        "dedupe_hit": bool(pre_add_check_result),
+                        "phase": "pre_add",
+                    },
+                )
+                if pre_add_check_result is not None:
+                    return UpsertResult(**pre_add_check_result)
+                stored = self.storage.add_fact(
+                    fact,
+                    embedding,
+                    input_fp=None,
+                    output_fp=out_fp,
+                )
+                stored_op = ing_op.child("stored")
+                stored_op.attach_json("stored_fact.json", stored.model_dump())
                 dbg = {
                     "result": "added_new",
                     "similarity": sim,
@@ -584,10 +647,10 @@ class MemoryIngestion:
                     "judge_decision": None,
                     "top_id": top_id,
                     "fingerprint_discarded": False,
-                    "new_record_id": record_ids[0] if record_ids else None,
+                    "new_record_id": stored.record_id,
                 }
-                op.attach_json("debug.json", dbg)
-                return dbg
+                ing_op.attach_json("debug.json", dbg)
+                return UpsertResult(**dbg)
 
             new_rec = fact.model_dump()
             old = (
@@ -600,7 +663,7 @@ class MemoryIngestion:
             old_meta = (old.get("metadatas") or [{}])[0] or {}
             old_rec = {"content": old_doc, **old_meta}
 
-            judge_dir = op.child("judge")
+            judge_dir = ing_op.child("judge")
             judge = self._call_llm_judge(
                 old_rec, new_rec, record_type="fact", similarity=sim, op=judge_dir
             )
@@ -608,24 +671,34 @@ class MemoryIngestion:
 
             if decision == "add_new":
                 # safety re-check before add
-                try:
-                    if out_fp and self.storage.fact_exists_by_output_fp(out_fp):
-                        return {
-                            "result": "discarded_by_fingerprint",
-                            "similarity": sim,
-                            "threshold": threshold,
-                            "invoked_judge": True,
-                            "judge_decision": decision,
-                            "top_id": top_id,
-                            "fingerprint_discarded": True,
-                        }
-                except Exception as exc:
-                    self.logger.warning(
-                        "Output-fp recheck before judge-add failed: %s", exc
-                    )
-                record_ids = self.storage.add_facts(
-                    [fact], [embedding], output_fps=[out_fp]
+                pre_judge_add_check_result = self._discard_if_output_fp_exists(
+                    out_fp=out_fp,
+                    similarity=sim,
+                    threshold=threshold,
+                    invoked_judge=True,
+                    judge_decision=decision,
+                    top_id=top_id,
                 )
+                # Always log pre-judge-add check result
+                fp_op.attach_json(
+                    "pre_judge_add_check.json",
+                    {
+                        "output_fp": out_fp,
+                        "dedupe_hit": bool(pre_judge_add_check_result),
+                        "phase": "pre_judge_add",
+                        "judge_decision": decision,
+                    },
+                )
+                if pre_judge_add_check_result is not None:
+                    return UpsertResult(**pre_judge_add_check_result)
+                stored = self.storage.add_fact(
+                    fact,
+                    embedding,
+                    input_fp=None,
+                    output_fp=out_fp,
+                )
+                stored_op = ing_op.child("stored")
+                stored_op.attach_json("stored_fact.json", stored.model_dump())
                 dbg = {
                     "result": "added_new",
                     "similarity": sim,
@@ -635,10 +708,10 @@ class MemoryIngestion:
                     "top_id": top_id,
                     "fingerprint_discarded": False,
                     "judge_log_dir": judge_dir.path().as_posix(),
-                    "new_record_id": record_ids[0] if record_ids else None,
+                    "new_record_id": stored.record_id,
                 }
-                op.attach_json("debug.json", dbg)
-                return dbg
+                ing_op.attach_json("debug.json", dbg)
+                return UpsertResult(**dbg)
             if decision == "update_existing":
                 updated_payload = judge.get("updated_record") or {}
                 try:
@@ -648,16 +721,18 @@ class MemoryIngestion:
                         f"Invalid updated_record from judge, fallback add_new: {e}"
                     )
                     self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
-                    return {
-                        "result": "added_new",
-                        "similarity": sim,
-                        "threshold": threshold,
-                        "invoked_judge": True,
-                        "judge_decision": "add_new",
-                        "top_id": top_id,
-                        "fingerprint_discarded": False,
-                        "judge_log_dir": judge.get("log_dir"),
-                    }
+                    return UpsertResult(
+                        **{
+                            "result": "added_new",
+                            "similarity": sim,
+                            "threshold": threshold,
+                            "invoked_judge": True,
+                            "judge_decision": "add_new",
+                            "top_id": top_id,
+                            "fingerprint_discarded": False,
+                            "judge_log_dir": judge.get("log_dir"),
+                        }
+                    )
                 upd_emb = self._generate_embedding(updated.content)
                 self.storage.update_fact(top_id, updated, embedding=upd_emb)
                 dbg = {
@@ -670,28 +745,38 @@ class MemoryIngestion:
                     "fingerprint_discarded": False,
                     "judge_log_dir": judge_dir.path().as_posix(),
                 }
-                op.attach_json("debug.json", dbg)
-                return dbg
+                ing_op.attach_json("debug.json", dbg)
+                return UpsertResult(**dbg)
             if decision == "keep_new_delete_old":
                 # safety re-check before add
-                try:
-                    if out_fp and self.storage.fact_exists_by_output_fp(out_fp):
-                        return {
-                            "result": "discarded_by_fingerprint",
-                            "similarity": sim,
-                            "threshold": threshold,
-                            "invoked_judge": True,
-                            "judge_decision": decision,
-                            "top_id": top_id,
-                            "fingerprint_discarded": True,
-                        }
-                except Exception as exc:
-                    self.logger.warning(
-                        "Output-fp recheck before keep_new_add failed: %s", exc
-                    )
-                record_ids = self.storage.add_facts(
-                    [fact], [embedding], output_fps=[out_fp]
+                pre_keep_new_add_check_result = self._discard_if_output_fp_exists(
+                    out_fp=out_fp,
+                    similarity=sim,
+                    threshold=threshold,
+                    invoked_judge=True,
+                    judge_decision=decision,
+                    top_id=top_id,
                 )
+                # Always log pre-keep-new-add check result
+                fp_op.attach_json(
+                    "pre_keep_new_add_check.json",
+                    {
+                        "output_fp": out_fp,
+                        "dedupe_hit": bool(pre_keep_new_add_check_result),
+                        "phase": "pre_keep_new_add",
+                        "judge_decision": decision,
+                    },
+                )
+                if pre_keep_new_add_check_result is not None:
+                    return UpsertResult(**pre_keep_new_add_check_result)
+                stored = self.storage.add_fact(
+                    fact,
+                    embedding,
+                    input_fp=None,
+                    output_fp=out_fp,
+                )
+                stored_op = ing_op.child("stored")
+                stored_op.attach_json("stored_fact.json", stored.model_dump())
                 self.storage.delete_records(
                     self.storage.config.declarative_collection_name, [top_id]
                 )
@@ -704,10 +789,10 @@ class MemoryIngestion:
                     "top_id": top_id,
                     "fingerprint_discarded": False,
                     "judge_log_dir": judge_dir.path().as_posix(),
-                    "new_record_id": record_ids[0] if record_ids else None,
+                    "new_record_id": stored.record_id,
                 }
-                op.attach_json("debug.json", dbg)
-                return dbg
+                ing_op.attach_json("debug.json", dbg)
+                return UpsertResult(**dbg)
             if decision == "keep_old_delete_new":
                 dbg = {
                     "result": "kept_old_discarded_new",
@@ -719,12 +804,17 @@ class MemoryIngestion:
                     "fingerprint_discarded": False,
                     "judge_log_dir": judge_dir.path().as_posix(),
                 }
-                op.attach_json("debug.json", dbg)
-                return dbg
+                ing_op.attach_json("debug.json", dbg)
+                return UpsertResult(**dbg)
 
-            record_ids = self.storage.add_facts(
-                [fact], [embedding], output_fps=[out_fp]
+            stored = self.storage.add_fact(
+                fact,
+                embedding,
+                input_fp=None,
+                output_fp=out_fp,
             )
+            stored_op = ing_op.child("stored")
+            stored_op.attach_json("stored_fact.json", stored.model_dump())
             dbg = {
                 "result": "added_new",
                 "similarity": sim,
@@ -734,12 +824,25 @@ class MemoryIngestion:
                 "top_id": top_id,
                 "fingerprint_discarded": False,
                 "judge_log_dir": judge_dir.path().as_posix(),
-                "new_record_id": record_ids[0] if record_ids else None,
+                "new_record_id": stored.record_id,
             }
-            op.attach_json("debug.json", dbg)
-            return dbg
+            ing_op.attach_json("debug.json", dbg)
+            return UpsertResult(**dbg)
         except Exception as e:
             raise IngestionError(f"Upsert fact with policy failed: {e}") from e
+
+    def _compose_fact_message(self, result: str) -> str:
+        if result == "added_new":
+            return "Successfully added fact."
+        if result == "discarded_by_fingerprint":
+            return "New fact discarded (duplicate content detected)."
+        if result == "updated_existing":
+            return "Successfully updated existing fact."
+        if result == "kept_new_deleted_old":
+            return "Kept new fact and deleted old."
+        if result == "kept_old_discarded_new":
+            return "Kept old fact and discarded new."
+        return "Fact upsert completed."
 
     def _extract_keywords_with_jieba(self, text: str) -> list[str]:
         """
@@ -824,7 +927,7 @@ class MemoryIngestion:
             prompt = self.keyword_extraction_prompt.format(query=query)
 
             # --- prompt logging: keyword extraction ---
-            keyword_op = op.child("keyword") if op is not None else None
+            keyword_op = op if op is not None else None
             if keyword_op is not None:
                 keyword_op.attach_text("input_prompt.txt", prompt)
 
@@ -833,11 +936,11 @@ class MemoryIngestion:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a keyword extraction expert.",
+                        "content": "You are a keyword extraction expert. Output strictly a JSON array only. Do NOT use Markdown code fences or any additional text.",
                     },
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.1,
+                temperature=0.0,
             )
 
             result = response.choices[0].message.content
@@ -990,15 +1093,17 @@ class MemoryIngestion:
                 task_description=task_description,
             )
 
-            # Prepare operation logger for learn_from_task
-            op = OperationLogger.create(
-                getattr(self.config, "logs_base_dir", "./memory_system/logs"),
-                "learn_from_task",
-                self._safe_slug(source_task_id),
-                enabled=getattr(self.config, "operation_logs_enabled", True),
-            )
-            # Persist raw inputs
-            op.attach_json(
+            # Prepare ingestion-scoped logger
+            if op is None:
+                op = OperationLogger.create(
+                    self.config.logs_base_dir,
+                    "learn_from_task",
+                    self._safe_slug(source_task_id),
+                    enabled=self.config.operation_logs_enabled,
+                )
+            ing_op = op.child("ingestion")
+            # Persist raw inputs at ingestion level
+            ing_op.attach_json(
                 "input.json",
                 {
                     "raw_history": raw_history,
@@ -1010,7 +1115,9 @@ class MemoryIngestion:
             )
 
             # Distill experience using LLM (logs into op/reflect)
-            distilled_data = self._distill_experience_with_llm(learning_request, op=op)
+            distilled_data = self._distill_experience_with_llm(
+                learning_request, op=ing_op
+            )
 
             # Create action steps
             action_steps = []
@@ -1050,7 +1157,7 @@ class MemoryIngestion:
             )
 
             # Summary artifact for the operation
-            op.attach_json(
+            ing_op.attach_json(
                 "summary.json",
                 {
                     "result": "success",
@@ -1067,12 +1174,13 @@ class MemoryIngestion:
             try:
                 if op is None:
                     op = OperationLogger.create(
-                        getattr(self.config, "logs_base_dir", "./memory_system/logs"),
+                        self.config.logs_base_dir,
                         "learn_from_task",
                         self._safe_slug(source_task_id),
-                        enabled=getattr(self.config, "operation_logs_enabled", True),
+                        enabled=self.config.operation_logs_enabled,
                     )
-                op.attach_json(
+                ing_op = op.child("ingestion")
+                ing_op.attach_json(
                     "error.json",
                     {
                         "timestamp": datetime.now().isoformat(),
@@ -1156,14 +1264,16 @@ class MemoryIngestion:
                         exc,
                     )
 
-            # Prepare operation logger
-            op = op or OperationLogger.create(
-                getattr(self.config, "logs_base_dir", "./memory_system/logs"),
-                "add_experience",
-                self._safe_slug(experience.source_task_id),
-                enabled=getattr(self.config, "operation_logs_enabled", True),
-            )
-            op.attach_json("input.json", experience)
+            # Prepare ingestion-scoped logger
+            if op is None:
+                op = OperationLogger.create(
+                    self.config.logs_base_dir,
+                    "add_experience",
+                    self._safe_slug(experience.source_task_id),
+                    enabled=self.config.operation_logs_enabled,
+                )
+            ing_op = op.child("ingestion")
+            ing_op.attach_json("input.json", experience)
 
             # Generate embedding
             embedding = self._generate_embedding(experience.task_description)
@@ -1171,7 +1281,7 @@ class MemoryIngestion:
             # Store the experience
             record_ids = self.storage.add_experiences([experience], [embedding])
 
-            op.attach_json(
+            ing_op.attach_json(
                 "summary.json",
                 {
                     "result": "success",
@@ -1183,71 +1293,6 @@ class MemoryIngestion:
 
         except Exception as e:
             raise IngestionError(f"Failed to add experience: {e}") from e
-
-    def add_fact(
-        self, content: str, keywords: list[str], source: str = "manual"
-    ) -> str:
-        """
-        Add a semantic fact to the knowledge base.
-
-        Args:
-            content: The factual content to add
-            keywords: List of keywords for retrieval
-            source: Source of this knowledge
-
-        Returns:
-            Success message with record ID
-
-        Raises:
-            IngestionError: If adding fact fails
-        """
-        try:
-            # Validate input
-            if not (content or "").strip():
-                raise IngestionError("Content cannot be empty for fact")
-
-            # Create fact record
-            fact = FactRecord(content=content, keywords=keywords, source=source)
-
-            # Output fingerprint pre-check (explicit, fingerprint-first policy)
-            out_fp = None
-            compute_method = getattr(self.storage, "compute_fact_output_fp", None)
-            if callable(compute_method) and compute_method.__class__.__name__ not in {
-                "Mock",
-                "MagicMock",
-            }:
-                try:
-                    out_fp = compute_method(fact)
-                except Exception:
-                    out_fp = None
-            exists_method = getattr(self.storage, "fact_exists_by_output_fp", None)
-            if (
-                out_fp
-                and callable(exists_method)
-                and exists_method.__class__.__name__ not in {"Mock", "MagicMock"}
-            ):
-                try:
-                    if bool(exists_method(out_fp)):
-                        return "Fact already exists, skipping."
-                except Exception as exc:
-                    self.logger.warning(
-                        "Output fingerprint check failed (fact), continuing without dedupe: %s",
-                        exc,
-                    )
-
-            # Generate embedding
-            embedding = self._generate_embedding(content)
-
-            # Store the fact
-            record_ids = self.storage.add_facts([fact], [embedding])
-
-            if not record_ids:
-                return "Fact already exists, skipping."
-
-            return f"Successfully added fact. Record ID: {record_ids[0]}"
-
-        except Exception as e:
-            raise IngestionError(f"Failed to add fact: {e}") from e
 
     def batch_add_facts(
         self, facts_data: list[dict[str, Any]], op: OperationLogger | None = None
@@ -1272,28 +1317,31 @@ class MemoryIngestion:
                         f"Content cannot be empty for fact at index {i}"
                     )
 
-            # Operation logger for batch
+            # Operation logger for batch (ingestion scope)
             if op is None:
                 op = OperationLogger.create(
-                    getattr(self.config, "logs_base_dir", "./memory_system/logs"),
+                    self.config.logs_base_dir,
                     "batch_add_facts",
-                    enabled=getattr(self.config, "operation_logs_enabled", True),
+                    enabled=self.config.operation_logs_enabled,
                 )
-            op.attach_json("input.json", facts_data)
+            ing_op = op.child("ingestion")
+            ing_op.attach_json("input.json", facts_data)
 
-            # Simple batch: route through single entry with op child per item
+            # Simple batch: route each item through upsert policy with per-item child op
             success_msgs: list[str] = []
             for idx, fact_data in enumerate(facts_data, start=1):
-                item_op = op.child(f"item_{idx:03d}")
-                msg = self.add_fact(
+                item_op = ing_op.child(f"item_{idx:03d}")
+                fact = FactRecord(
                     content=fact_data["content"],
                     keywords=fact_data.get("keywords", []),
                     source=fact_data.get("source", "batch_import"),
                 )
+                dbg = self.upsert_fact_with_policy(fact, op=item_op)
+                msg = self._compose_fact_message(dbg.result)
                 # Mirror per-item message for quick glance
                 item_op.attach_text("result.txt", msg)
                 success_msgs.append(msg)
-            op.attach_json(
+            ing_op.attach_json(
                 "summary.json", {"added": len(success_msgs), "total": len(facts_data)}
             )
             return success_msgs

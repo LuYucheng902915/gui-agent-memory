@@ -128,7 +128,11 @@ class TestMemorySystem:
     def test_add_fact_success(self, memory_system, mock_ingestion):
         """Test successful fact addition."""
         # Arrange
-        mock_ingestion.add_fact.return_value = "fact_123"
+        from gui_agent_memory.models import UpsertResult
+
+        mock_ingestion.upsert_fact_with_policy.return_value = UpsertResult(
+            result="added_new", new_record_id="fact_123"
+        )
 
         # Act
         result = memory_system.add_fact(
@@ -138,8 +142,10 @@ class TestMemorySystem:
         )
 
         # Assert
-        assert result == "fact_123"
-        mock_ingestion.add_fact.assert_called_once()
+        assert result.success
+        assert result.message == "Successfully added fact."
+        assert result.result == "added_new"
+        mock_ingestion.upsert_fact_with_policy.assert_called_once()
 
 
 class TestMemorySystemIntegration:
@@ -228,14 +234,18 @@ class TestMemorySystemIntegration:
 
     def test_add_fact_and_retrieve_workflow(self, memory_system):
         """Test workflow: add fact -> retrieve related information."""
+        # Step 1: Add a fact
         from gui_agent_memory.models import (
             FactRecord,
             RetrievalResult,
+            UpsertResult,
         )
 
-        # Step 1: Add a fact
-        memory_system._mock_ingestion.add_fact.return_value = (
-            "Successfully added fact with ID: fact_001"
+        memory_system._mock_ingestion.upsert_fact_with_policy.return_value = (
+            UpsertResult(
+                result="added_new",
+                new_record_id="fact_001",
+            )
         )
 
         fact_result = memory_system.add_fact(
@@ -245,12 +255,9 @@ class TestMemorySystemIntegration:
         )
 
         # Verify fact addition
-        assert "Successfully added fact" in fact_result
-        memory_system._mock_ingestion.add_fact.assert_called_once_with(
-            "OAuth 2.0 is an authorization framework",
-            ["oauth", "authorization", "security"],
-            "documentation",
-        )
+        assert fact_result.success
+        assert fact_result.message == "Successfully added fact."
+        memory_system._mock_ingestion.upsert_fact_with_policy.assert_called_once()
 
         # Step 2: Retrieve related information
         mock_retrieval_result = Mock(spec=RetrievalResult)
@@ -469,24 +476,28 @@ class TestMemorySystemErrorHandling:
 
     def test_add_fact_empty_keywords(self, memory_system):
         """Test add_fact with empty keywords list."""
-        memory_system._mock_ingestion.add_fact.return_value = "fact_123"
+        from gui_agent_memory.models import UpsertResult
+
+        memory_system._mock_ingestion.upsert_fact_with_policy.return_value = (
+            UpsertResult(
+                result="added_new",
+            )
+        )
 
         result = memory_system.add_fact(
             content="Test fact",
             keywords=[],
         )
 
-        assert result == "fact_123"
-        memory_system._mock_ingestion.add_fact.assert_called_once_with(
-            "Test fact", [], "manual"
-        )
+        assert result.message == "Successfully added fact."
+        memory_system._mock_ingestion.upsert_fact_with_policy.assert_called_once()
 
     def test_add_fact_ingestion_error(self, memory_system):
         """Test add_fact when IngestionError is raised."""
         from gui_agent_memory.ingestion import IngestionError
 
-        memory_system._mock_ingestion.add_fact.side_effect = IngestionError(
-            "Test ingestion error"
+        memory_system._mock_ingestion.upsert_fact_with_policy.side_effect = (
+            IngestionError("Test ingestion error")
         )
 
         with pytest.raises(MemorySystemError) as exc_info:
@@ -906,6 +917,7 @@ class TestConfigurationDefaultValues:
         custom_config.reranker_model = "test-reranker"
         custom_config.experience_llm_model = "test-llm"
         custom_config.chroma_db_path = "/test/path"
+        custom_config.operation_logs_enabled = False
         custom_config.logs_base_dir = "./test_data/test_logs"
         custom_config.log_enabled = True
 

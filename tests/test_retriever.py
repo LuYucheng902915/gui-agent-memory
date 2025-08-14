@@ -105,7 +105,7 @@ class TestMemoryRetriever:
         # Assert
         assert result == [0.1, 0.2, 0.3]
         mock_config.embedding_client.embeddings.create.assert_called_once_with(
-            model=mock_config.embedding_model, input=query
+            model=mock_config.embedding_model, input=query, dimensions=10
         )
 
     def test_extract_keywords(self, retriever):

@@ -110,7 +110,7 @@ class TestStorageErrorHandling:
         query_embedding = [0.1, 0.2, 0.3]
 
         with pytest.raises(StorageError) as exc_info:
-            storage.query_experiences(query_embeddings=[query_embedding], n_results=5)
+            storage.query_experiences(query_embeddings=[query_embedding], top_k=5)
 
         assert "Failed to query experiences" in str(exc_info.value)
 
