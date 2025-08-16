@@ -21,6 +21,18 @@ from unittest.mock import Mock
 
 import pytest
 
+
+# Disable LLM retry globally for tests by default to speed up the suite.
+# Individual tests can still re-enable via monkeypatch.setenv in their own scope.
+@pytest.fixture(scope="session", autouse=True)
+def _disable_llm_retry_session():
+    os.environ["LLM_RETRY_ENABLED"] = "false"
+    # Also shrink retry parameters just in case a test turns it on
+    os.environ["LLM_RETRY_ATTEMPTS"] = "1"
+    os.environ["LLM_RETRY_INITIAL_SECONDS"] = "0"
+    os.environ["LLM_RETRY_MAX_SECONDS"] = "0.01"
+
+
 # Set up FAKE environment variables for all tests - DO NOT USE REAL API KEYS!
 os.environ.setdefault("EMBEDDING_LLM_BASE_URL", "https://test-embedding.example.com/v1")
 os.environ.setdefault("EMBEDDING_LLM_API_KEY", "test-fake-embedding-key-12345")

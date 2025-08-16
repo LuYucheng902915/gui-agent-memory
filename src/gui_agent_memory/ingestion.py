@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import jieba
+import jieba.analyse
 
 from .config import get_config
 from .log_utils import OperationLogger
@@ -28,6 +29,7 @@ from .models import (
     LearningRequest,
     UpsertResult,
 )
+from .retry_utils import retry_llm_call
 from .storage import MemoryStorage
 
 # Module-level logger
@@ -58,64 +60,109 @@ class MemoryIngestion:
         # Load prompt templates
         self._load_prompts()
 
+    def _make_upsert_payload(
+        self,
+        **overrides: Any,
+    ) -> dict[str, Any]:
+        """
+        Build a consistent debug/upsert payload with full keys and None defaults.
+
+        Args:
+            base: Optional base payload to start from
+            overrides: Fields to override on top of defaults/base
+
+        Returns:
+            Completed payload dict with all expected keys present
+        """
+        defaults: dict[str, Any] = {
+            "result": None,
+            "similarity": None,
+            "threshold": None,
+            "invoked_judge": None,
+            "judge_decision": None,
+            "top_id": None,
+            "fingerprint_discarded": None,
+            "judge_log_dir": None,
+            "new_record_id": None,
+            "similarity_origin": None,
+            "pre_dedupe_hit": None,
+            "db_hit": None,
+        }
+        payload = defaults | overrides
+        return payload
+
+    def _attach(self, op: OperationLogger | None, filename: str, data: Any) -> None:
+        """Shorthand to write artifact into op (if provided).
+
+        - dict/list/tuple → JSON
+        - otherwise → text (str(data))
+        """
+        if op is None:
+            return
+        if isinstance(data, dict | list | tuple):
+            op.attach_json(filename, data)
+        else:
+            op.attach_text(filename, str(data))
+
+    def _log_db_check(
+        self,
+        fp_op: OperationLogger,
+        *,
+        output_fp: str,
+        db_hit: bool,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "output_fp": output_fp,
+            "dedupe_hit": bool(db_hit),
+            "phase": "db_write",
+        }
+        fp_op.attach_json("db_check.json", payload)
+
+    # ----------------------------
+    # Dead-letter queue (DLQ)
+    # ----------------------------
+    def _append_dead_letter(self, category: str, payload: dict[str, Any]) -> None:
+        try:
+            base = Path(self.config.logs_base_dir)
+            path = base / "dead_letter" / f"{category}.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            line = json.dumps(payload, ensure_ascii=False, default=str)
+            path.write_text("", encoding="utf-8") if not path.exists() else None
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception as exc:
+            # Best-effort only: log and continue; do not mask original errors
+            self.logger.debug("DLQ append failed: %s", exc)
+
+    def _extract_keywords_strict(
+        self, fact: FactRecord, op: OperationLogger | None = None
+    ) -> list[str]:
+        """Extract keywords with fail-fast semantics and DLQ on total failure.
+
+        Strategy:
+        - Try LLM (with internal fallback to jieba). If result non-empty → OK
+        - Otherwise: append dead-letter and raise IngestionError
+        """
+        keywords = self._extract_keywords_with_llm(fact.content, op=op)
+        if isinstance(keywords, list) and len(keywords) > 0:
+            return keywords
+
+        self._append_dead_letter(
+            category="keyword_extraction",
+            payload={
+                "timestamp": datetime.now().isoformat(),
+                "reason": "keyword_extraction_failed",
+                "content_preview": (fact.content or "")[:200],
+                "fact": fact.model_dump(),
+            },
+        )
+        raise IngestionError(
+            "Keyword extraction failed; record sent to dead-letter queue"
+        )
+
     # ----------------------------
     # Private helpers (fact upsert)
     # ----------------------------
-    def _compute_fact_output_fp_safe(self, fact: FactRecord) -> str | None:
-        """Compute output fingerprint safely; log and return None on failure."""
-        try:
-            return self.storage.compute_fact_output_fp(fact)
-        except Exception as exc:
-            self.logger.warning("Compute output_fp failed: %s", exc)
-            return None
-
-    def _discard_payload(
-        self,
-        *,
-        similarity: float,
-        threshold: float,
-        invoked_judge: bool,
-        judge_decision: str | None,
-        top_id: str | None,
-        similarity_origin: str = "fingerprint",
-    ) -> dict[str, Any]:
-        """Standardized discard result dict for fingerprint hits."""
-        return {
-            "result": "discarded_by_fingerprint",
-            "similarity": similarity,
-            "threshold": threshold,
-            "invoked_judge": invoked_judge,
-            "judge_decision": judge_decision,
-            "top_id": top_id,
-            "fingerprint_discarded": True,
-            "details": {"similarity_origin": similarity_origin},
-        }
-
-    def _discard_if_output_fp_exists(
-        self,
-        *,
-        out_fp: str | None,
-        similarity: float,
-        threshold: float,
-        invoked_judge: bool,
-        judge_decision: str | None,
-        top_id: str | None,
-    ) -> dict[str, Any] | None:
-        """If output_fp exists in storage, return discard payload; else None."""
-        try:
-            if out_fp and self.storage.fact_exists_by_output_fp(out_fp):
-                # Fingerprint match is a definitive equality; mark similarity as 1.0
-                return self._discard_payload(
-                    similarity=1.0,
-                    threshold=threshold,
-                    invoked_judge=invoked_judge,
-                    judge_decision=judge_decision,
-                    top_id=None,
-                )
-        except Exception as exc:
-            self.logger.warning("Output-fp existence check failed: %s", exc)
-        return None
-
     def _load_prompts(self) -> None:
         """Load prompt templates from packaged resources only (robust to patched reads)."""
         try:
@@ -208,6 +255,7 @@ class MemoryIngestion:
         )
         return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
+    @retry_llm_call
     def _generate_embedding(self, text: str) -> list[float]:
         """
         Generate embedding for the given text using an OpenAI-compatible embedding service.
@@ -250,6 +298,7 @@ class MemoryIngestion:
             new_record=json.dumps(new_record, ensure_ascii=False, default=str),
         )
 
+    @retry_llm_call
     def _call_llm_judge(
         self,
         old_record: dict[str, Any],
@@ -258,34 +307,12 @@ class MemoryIngestion:
         similarity: float | None = None,
         op: OperationLogger | None = None,
     ) -> dict[str, Any]:
-        """Call LLM Judge and persist artifacts.
-
-        If op is provided, write artifacts to op (e.g., op=OperationLogger for judge/);
-        otherwise fall back to PROMPT_LOG_DIR legacy path.
-        """
+        """Call LLM Judge. Logging mirrors keyword path; failures are fail-fast."""
         client = None
-        # Resolve judge artifact directory
-        if op is not None:
-            judge_dir = op.path()
-
-            def _attach_text(name: str, content: str) -> None:
-                op.attach_text(name, content)
-        else:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            base_prompt_dir = Path(self.config.logs_base_dir) / "prompts"
-            judge_dir = base_prompt_dir / f"judge_{ts}"
-            judge_dir.mkdir(parents=True, exist_ok=True)
-
-            def _attach_text(name: str, content: str) -> None:
-                try:
-                    (judge_dir / name).write_text(content, encoding="utf-8")
-                except Exception:
-                    self.logger.exception("Failed to write judge artifact: %s", name)
-
         try:
             client = self.config.get_experience_llm_client()
             prompt = self._judge_prompt(old_record, new_record, record_type, similarity)
-            _attach_text("input_prompt.txt", prompt)
+            self._attach(op, "input_prompt.txt", prompt)
 
             response = client.chat.completions.create(
                 model=self.config.experience_llm_model,
@@ -299,75 +326,52 @@ class MemoryIngestion:
                 temperature=0.0,
             )
             result = response.choices[0].message.content or "{}"
-            _attach_text("model_output.json", result)
-            try:
-                # Be robust to Markdown code fences (``` or ```json)
-                text = result.strip()
-                if text.startswith("```"):
-                    # remove first fence line
-                    first_nl = text.find("\n")
-                    if first_nl != -1:
-                        text = text[first_nl + 1 :]
-                    # remove trailing fence line if present
-                    if text.endswith("```"):
-                        text = text[:-3]
-                payload = json.loads(text)
-            except Exception as je:
-                _attach_text("model_error.txt", f"JSON parse error: {je}\n{result}")
-                raise
-            if isinstance(payload, dict):
-                payload["log_dir"] = judge_dir.as_posix()
-            return payload
+            self._attach(op, "model_output.json", result)
+            # Be robust to Markdown code fences (``` or ```json)
+            text = result.strip()
+            if text.startswith("```"):
+                first_nl = text.find("\n")
+                if first_nl != -1:
+                    text = text[first_nl + 1 :]
+                if text.endswith("```"):
+                    text = text[:-3]
+            payload = json.loads(text)
+            return payload if isinstance(payload, dict) else {}
         except Exception as e:
-            _attach_text(
+            self._attach(
+                op,
                 "model_error.txt",
                 f"Judge failed: {e}\nrecord_type={record_type} similarity={similarity}\nclient={'ok' if client else 'none'}",
             )
-            self.logger.warning(f"LLM judge failed, degrade to add_new: {e}")
-            return {
-                "decision": "add_new",
-                "target_id": None,
-                "updated_record": None,
-                "reason": "fallback",
-                "log_dir": judge_dir.as_posix(),
-            }
+            raise IngestionError(f"LLM judge failed: {e}") from e
 
     def _cosine_similarity_from_distance(self, distance: float | None) -> float:
         if distance is None:
-            return 0.0
+            return -1.0
         # Chroma returns distance; treat similarity ~= 1 - distance for cosine metric
         try:
-            return max(0.0, min(1.0, 1.0 - float(distance)))
+            # Cosine similarity is in [-1, 1]
+            return max(-1.0, min(1.0, 1.0 - float(distance)))
         except Exception:
             return 0.0
 
     def _top1_similarity_experience(
         self, embedding: list[float]
     ) -> tuple[str | None, float]:
-        try:
-            res = self.storage.query_experiences(query_embeddings=[embedding], top_k=1)
-            ids = res.get("ids", [[]])[0] if res else []
-            distances = res.get("distances", [[]])[0] if res else []
-            top_id = ids[0] if ids else None
-            sim = self._cosine_similarity_from_distance(
-                distances[0] if distances else None
-            )
-            return top_id, sim
-        except Exception:
-            return None, 0.0
+        res = self.storage.query_experiences(query_embeddings=[embedding], top_k=1)
+        ids = res.get("ids", [[]])[0] if res else []
+        distances = res.get("distances", [[]])[0] if res else []
+        top_id = ids[0] if ids else None
+        sim = self._cosine_similarity_from_distance(distances[0] if distances else None)
+        return top_id, sim
 
     def _top1_similarity_fact(self, embedding: list[float]) -> tuple[str | None, float]:
-        try:
-            res = self.storage.query_facts(query_embeddings=[embedding], top_k=1)
-            ids = res.get("ids", [[]])[0] if res else []
-            distances = res.get("distances", [[]])[0] if res else []
-            top_id = ids[0] if ids else None
-            sim = self._cosine_similarity_from_distance(
-                distances[0] if distances else None
-            )
-            return top_id, sim
-        except Exception:
-            return None, 0.0
+        res = self.storage.query_facts(query_embeddings=[embedding], top_k=1)
+        ids = res.get("ids", [[]])[0] if res else []
+        distances = res.get("distances", [[]])[0] if res else []
+        top_id = ids[0] if ids else None
+        sim = self._cosine_similarity_from_distance(distances[0] if distances else None)
+        return top_id, sim
 
     # ---------------------------------
     # Public upsert with similarity policy
@@ -546,109 +550,84 @@ class MemoryIngestion:
             threshold = self.config.similarity_threshold_judge
 
             # 1) Output fingerprint dedupe (early exit)
-            out_fp: Any = self._compute_fact_output_fp_safe(fact)
-            # Log computed fingerprint before dedupe under ingestion/fingerprint/
+            out_fp: str = self.storage.compute_fact_output_fp(fact)
+            # Prepare fingerprint phase logger (no standalone pre_dedupe.json; only *_check.json files)
             fp_op = ing_op.child("fingerprint")
-            fp_op.attach_json(
-                "pre_dedupe.json",
-                {"output_fp": out_fp, "phase": "pre_dedupe"},
-            )
-            pre_dedupe_result = self._discard_if_output_fp_exists(
-                out_fp=out_fp,
-                similarity=0.0,
-                threshold=threshold,
-                invoked_judge=False,
-                judge_decision=None,
-                top_id=None,
-            )
+            pre_dedupe_hit = self.storage.fact_exists_by_output_fp(out_fp)
             # Log pre-dedupe check result (hit or miss)
             fp_op.attach_json(
                 "pre_dedupe_check.json",
                 {
                     "output_fp": out_fp,
-                    "dedupe_hit": bool(pre_dedupe_result),
+                    "dedupe_hit": bool(pre_dedupe_hit),
                     "phase": "pre_dedupe",
                 },
             )
-            if pre_dedupe_result is not None:
-                # Mark dedupe hit
-                ing_op.attach_json("debug.json", pre_dedupe_result)
-                return UpsertResult(**pre_dedupe_result)
-
-            # Keyword generation after fingerprint check, before embedding
-            try:
-                if not fact.keywords:
-                    keyword_op = ing_op.child("keyword")
-                    extracted = self._extract_keywords_with_llm(
-                        fact.content, op=keyword_op
-                    )
-                    fact.keywords = list(extracted)[:10] if extracted else []
-            except Exception as kw_exc:
-                self.logger.warning(
-                    "Keyword generation failed, continue without: %s", kw_exc
+            if pre_dedupe_hit:
+                # Build minimal, consistent payload for fingerprint discard
+                dbg = self._make_upsert_payload(
+                    result="discarded_by_fingerprint",
+                    similarity=1.0,
+                    threshold=threshold,
+                    invoked_judge=False,
+                    fingerprint_discarded=True,
+                    similarity_origin="fingerprint",
+                    pre_dedupe_hit=True,
                 )
+                ing_op.attach_json("debug.json", dbg)
+                return UpsertResult(**dbg)
 
+            # Keyword generation after fingerprint check, before embedding (strict + DLQ)
+            if not fact.keywords:
+                keyword_op = ing_op.child("keyword")
+                extracted = self._extract_keywords_strict(fact, op=keyword_op)
+                fact.keywords = list(extracted)[:10]
+
+            # Core path: embedding generation (Fail-Fast)
             embedding = self._generate_embedding(fact.content)
-            # --- embedding logging (preview + stats) ---
-            try:
-                emb_op = ing_op.child("embedding")
-                preview = [
-                    round(float(x), 6) for x in (embedding[:64] if embedding else [])
-                ]
-                stats = {
-                    "dim": len(embedding),
-                    "min": round(float(min(embedding)), 6) if embedding else None,
-                    "max": round(float(max(embedding)), 6) if embedding else None,
-                    "mean": round(float(sum(embedding)) / len(embedding), 6)
-                    if embedding
-                    else None,
-                }
-                emb_op.attach_json(
-                    "embedding_preview.json", {"stats": stats, "preview": preview}
-                )
-            except Exception as emb_log_exc:
-                self.logger.warning("Failed to log embedding preview: %s", emb_log_exc)
+            emb_op = ing_op.child("embedding")
+            emb_op.attach_json("embedding.json", {"embedding": embedding})
+            # Core path: similarity query (Fail-Fast via storage)
             top_id, sim = self._top1_similarity_fact(embedding)
 
             if top_id is None or sim < threshold:
-                # safety re-check before add
-                pre_add_check_result = self._discard_if_output_fp_exists(
-                    out_fp=out_fp,
-                    similarity=sim,
-                    threshold=threshold,
-                    invoked_judge=False,
-                    judge_decision=None,
-                    top_id=top_id,
-                )
-                # Always log pre-add check result
-                fp_op.attach_json(
-                    "pre_add_check.json",
-                    {
-                        "output_fp": out_fp,
-                        "dedupe_hit": bool(pre_add_check_result),
-                        "phase": "pre_add",
-                    },
-                )
-                if pre_add_check_result is not None:
-                    return UpsertResult(**pre_add_check_result)
-                stored = self.storage.add_fact(
+                # Core path: DB write with explicit duplicate status (no exception control flow)
+                stored, db_hit = self.storage.add_fact(
                     fact,
                     embedding,
                     input_fp=None,
                     output_fp=out_fp,
                 )
+                self._log_db_check(fp_op, output_fp=out_fp, db_hit=db_hit)
+                if db_hit:
+                    dbg = self._make_upsert_payload(
+                        result="discarded_by_fingerprint",
+                        similarity=1.0,
+                        threshold=threshold,
+                        invoked_judge=False,
+                        top_id=top_id,
+                        fingerprint_discarded=True,
+                        similarity_origin="fingerprint",
+                        pre_dedupe_hit=False,
+                        db_hit=True,
+                    )
+                    ing_op.attach_json("debug.json", dbg)
+                    return UpsertResult(**dbg)
                 stored_op = ing_op.child("stored")
-                stored_op.attach_json("stored_fact.json", stored.model_dump())
-                dbg = {
-                    "result": "added_new",
-                    "similarity": sim,
-                    "threshold": threshold,
-                    "invoked_judge": False,
-                    "judge_decision": None,
-                    "top_id": top_id,
-                    "fingerprint_discarded": False,
-                    "new_record_id": stored.record_id,
-                }
+                if stored is not None:
+                    stored_op.attach_json("stored_fact.json", stored.model_dump())
+                dbg = self._make_upsert_payload(
+                    result="added_new",
+                    similarity=sim,
+                    threshold=threshold,
+                    invoked_judge=False,
+                    top_id=top_id,
+                    fingerprint_discarded=False,
+                    new_record_id=(stored.record_id if stored is not None else None),
+                    similarity_origin="vector",
+                    pre_dedupe_hit=False,
+                    db_hit=False,
+                )
                 ing_op.attach_json("debug.json", dbg)
                 return UpsertResult(**dbg)
 
@@ -663,53 +642,53 @@ class MemoryIngestion:
             old_meta = (old.get("metadatas") or [{}])[0] or {}
             old_rec = {"content": old_doc, **old_meta}
 
-            judge_dir = ing_op.child("judge")
+            judge_op = ing_op.child("judge")
+            # Core path: LLM Judge
             judge = self._call_llm_judge(
-                old_rec, new_rec, record_type="fact", similarity=sim, op=judge_dir
+                old_rec, new_rec, record_type="fact", similarity=sim, op=judge_op
             )
             decision = judge.get("decision", "add_new")
 
             if decision == "add_new":
-                # safety re-check before add
-                pre_judge_add_check_result = self._discard_if_output_fp_exists(
-                    out_fp=out_fp,
-                    similarity=sim,
-                    threshold=threshold,
-                    invoked_judge=True,
-                    judge_decision=decision,
-                    top_id=top_id,
-                )
-                # Always log pre-judge-add check result
-                fp_op.attach_json(
-                    "pre_judge_add_check.json",
-                    {
-                        "output_fp": out_fp,
-                        "dedupe_hit": bool(pre_judge_add_check_result),
-                        "phase": "pre_judge_add",
-                        "judge_decision": decision,
-                    },
-                )
-                if pre_judge_add_check_result is not None:
-                    return UpsertResult(**pre_judge_add_check_result)
-                stored = self.storage.add_fact(
+                stored, db_hit = self.storage.add_fact(
                     fact,
                     embedding,
                     input_fp=None,
                     output_fp=out_fp,
                 )
+                self._log_db_check(fp_op, output_fp=out_fp, db_hit=db_hit)
+                if db_hit:
+                    dbg = self._make_upsert_payload(
+                        result="discarded_by_fingerprint",
+                        similarity=1.0,
+                        threshold=threshold,
+                        invoked_judge=True,
+                        judge_decision=decision,
+                        top_id=top_id,
+                        fingerprint_discarded=True,
+                        similarity_origin="fingerprint",
+                        pre_dedupe_hit=False,
+                        db_hit=True,
+                    )
+                    ing_op.attach_json("debug.json", dbg)
+                    return UpsertResult(**dbg)
                 stored_op = ing_op.child("stored")
-                stored_op.attach_json("stored_fact.json", stored.model_dump())
-                dbg = {
-                    "result": "added_new",
-                    "similarity": sim,
-                    "threshold": threshold,
-                    "invoked_judge": True,
-                    "judge_decision": decision,
-                    "top_id": top_id,
-                    "fingerprint_discarded": False,
-                    "judge_log_dir": judge_dir.path().as_posix(),
-                    "new_record_id": stored.record_id,
-                }
+                if stored is not None:
+                    stored_op.attach_json("stored_fact.json", stored.model_dump())
+                dbg = self._make_upsert_payload(
+                    result="added_new",
+                    similarity=sim,
+                    threshold=threshold,
+                    invoked_judge=True,
+                    judge_decision=decision,
+                    top_id=top_id,
+                    fingerprint_discarded=False,
+                    judge_log_dir=judge.get("log_dir"),
+                    new_record_id=(stored.record_id if stored is not None else None),
+                    similarity_origin="vector",
+                    pre_dedupe_hit=False,
+                    db_hit=False,
+                )
                 ing_op.attach_json("debug.json", dbg)
                 return UpsertResult(**dbg)
             if decision == "update_existing":
@@ -735,97 +714,123 @@ class MemoryIngestion:
                     )
                 upd_emb = self._generate_embedding(updated.content)
                 self.storage.update_fact(top_id, updated, embedding=upd_emb)
-                dbg = {
-                    "result": "updated_existing",
-                    "similarity": sim,
-                    "threshold": threshold,
-                    "invoked_judge": True,
-                    "judge_decision": decision,
-                    "top_id": top_id,
-                    "fingerprint_discarded": False,
-                    "judge_log_dir": judge_dir.path().as_posix(),
-                }
-                ing_op.attach_json("debug.json", dbg)
-                return UpsertResult(**dbg)
-            if decision == "keep_new_delete_old":
-                # safety re-check before add
-                pre_keep_new_add_check_result = self._discard_if_output_fp_exists(
-                    out_fp=out_fp,
+                dbg = self._make_upsert_payload(
+                    result="updated_existing",
                     similarity=sim,
                     threshold=threshold,
                     invoked_judge=True,
                     judge_decision=decision,
                     top_id=top_id,
+                    fingerprint_discarded=False,
+                    judge_log_dir=judge.get("log_dir"),
+                    similarity_origin="vector",
+                    pre_dedupe_hit=False,
                 )
-                # Always log pre-keep-new-add check result
-                fp_op.attach_json(
-                    "pre_keep_new_add_check.json",
-                    {
-                        "output_fp": out_fp,
-                        "dedupe_hit": bool(pre_keep_new_add_check_result),
-                        "phase": "pre_keep_new_add",
-                        "judge_decision": decision,
-                    },
-                )
-                if pre_keep_new_add_check_result is not None:
-                    return UpsertResult(**pre_keep_new_add_check_result)
-                stored = self.storage.add_fact(
+                ing_op.attach_json("debug.json", dbg)
+                return UpsertResult(**dbg)
+            if decision == "keep_new_delete_old":
+                stored, db_hit = self.storage.add_fact(
                     fact,
                     embedding,
                     input_fp=None,
                     output_fp=out_fp,
                 )
+                self._log_db_check(fp_op, output_fp=out_fp, db_hit=db_hit)
+                if db_hit:
+                    dbg = self._make_upsert_payload(
+                        result="discarded_by_fingerprint",
+                        similarity=1.0,
+                        threshold=threshold,
+                        invoked_judge=True,
+                        judge_decision=decision,
+                        top_id=top_id,
+                        fingerprint_discarded=True,
+                        similarity_origin="fingerprint",
+                        pre_dedupe_hit=False,
+                        db_hit=True,
+                    )
+                    ing_op.attach_json("debug.json", dbg)
+                    return UpsertResult(**dbg)
                 stored_op = ing_op.child("stored")
-                stored_op.attach_json("stored_fact.json", stored.model_dump())
+                if stored is not None:
+                    stored_op.attach_json("stored_fact.json", stored.model_dump())
+                # Core path: DB delete (Fail-Fast)
                 self.storage.delete_records(
                     self.storage.config.declarative_collection_name, [top_id]
                 )
-                dbg = {
-                    "result": "kept_new_deleted_old",
-                    "similarity": sim,
-                    "threshold": threshold,
-                    "invoked_judge": True,
-                    "judge_decision": decision,
-                    "top_id": top_id,
-                    "fingerprint_discarded": False,
-                    "judge_log_dir": judge_dir.path().as_posix(),
-                    "new_record_id": stored.record_id,
-                }
+                dbg = self._make_upsert_payload(
+                    result="kept_new_deleted_old",
+                    similarity=sim,
+                    threshold=threshold,
+                    invoked_judge=True,
+                    judge_decision=decision,
+                    top_id=top_id,
+                    fingerprint_discarded=False,
+                    judge_log_dir=judge.get("log_dir"),
+                    new_record_id=(stored.record_id if stored is not None else None),
+                    similarity_origin="vector",
+                    pre_dedupe_hit=False,
+                    db_hit=False,
+                )
                 ing_op.attach_json("debug.json", dbg)
                 return UpsertResult(**dbg)
             if decision == "keep_old_delete_new":
-                dbg = {
-                    "result": "kept_old_discarded_new",
-                    "similarity": sim,
-                    "threshold": threshold,
-                    "invoked_judge": True,
-                    "judge_decision": decision,
-                    "top_id": top_id,
-                    "fingerprint_discarded": False,
-                    "judge_log_dir": judge_dir.path().as_posix(),
-                }
+                dbg = self._make_upsert_payload(
+                    result="kept_old_discarded_new",
+                    similarity=sim,
+                    threshold=threshold,
+                    invoked_judge=True,
+                    judge_decision=decision,
+                    top_id=top_id,
+                    fingerprint_discarded=False,
+                    judge_log_dir=judge.get("log_dir"),
+                    similarity_origin="vector",
+                    pre_dedupe_hit=False,
+                )
                 ing_op.attach_json("debug.json", dbg)
                 return UpsertResult(**dbg)
 
-            stored = self.storage.add_fact(
+            # Core path: DB write (Fail-Fast)
+            stored, db_hit = self.storage.add_fact(
                 fact,
                 embedding,
                 input_fp=None,
                 output_fp=out_fp,
             )
+            self._log_db_check(fp_op, output_fp=out_fp, db_hit=db_hit)
+            if db_hit:
+                dbg = self._make_upsert_payload(
+                    result="discarded_by_fingerprint",
+                    similarity=1.0,
+                    threshold=threshold,
+                    invoked_judge=True,
+                    judge_decision=decision,
+                    top_id=top_id,
+                    fingerprint_discarded=True,
+                    judge_log_dir=judge.get("log_dir"),
+                    similarity_origin="fingerprint",
+                    pre_dedupe_hit=False,
+                    db_hit=True,
+                )
+                ing_op.attach_json("debug.json", dbg)
+                return UpsertResult(**dbg)
             stored_op = ing_op.child("stored")
-            stored_op.attach_json("stored_fact.json", stored.model_dump())
-            dbg = {
-                "result": "added_new",
-                "similarity": sim,
-                "threshold": threshold,
-                "invoked_judge": True,
-                "judge_decision": decision,
-                "top_id": top_id,
-                "fingerprint_discarded": False,
-                "judge_log_dir": judge_dir.path().as_posix(),
-                "new_record_id": stored.record_id,
-            }
+            if stored is not None:
+                stored_op.attach_json("stored_fact.json", stored.model_dump())
+            dbg = self._make_upsert_payload(
+                result="added_new",
+                similarity=sim,
+                threshold=threshold,
+                invoked_judge=True,
+                judge_decision=decision,
+                top_id=top_id,
+                fingerprint_discarded=False,
+                judge_log_dir=judge.get("log_dir"),
+                new_record_id=(stored.record_id if stored is not None else None),
+                pre_dedupe_hit=False,
+                similarity_origin="vector",
+                db_hit=False,
+            )
             ing_op.attach_json("debug.json", dbg)
             return UpsertResult(**dbg)
         except Exception as e:
@@ -846,69 +851,23 @@ class MemoryIngestion:
 
     def _extract_keywords_with_jieba(self, text: str) -> list[str]:
         """
-        Extract keywords from text using jieba tokenizer.
-
-        Args:
-            text: Text to tokenize
+        Extract top keywords using jieba's TF-IDF algorithm.
 
         Returns:
-            List of keywords
+            List of up to 10 keywords ranked by TF-IDF.
         """
-        # Tokenize the text
-        tokens = jieba.lcut(text, cut_all=False)
+        try:
+            if not isinstance(text, str) or not text.strip():
+                return []
+            keywords = jieba.analyse.extract_tags(text, topK=10, withWeight=False)
+            return keywords
+        except Exception as e:
+            self.logger.error(
+                "Jieba fallback for keyword extraction also failed: %s", e
+            )
+            return []
 
-        # Filter out short tokens and common stop words
-        stop_words = {
-            "的",
-            "是",
-            "在",
-            "和",
-            "与",
-            "或",
-            "但是",
-            "如果",
-            "那么",
-            "了",
-            "也",
-            "就",
-            "都",
-            "要",
-            "可以",
-            "这",
-            "那",
-            "the",
-            "a",
-            "an",
-            "and",
-            "or",
-            "but",
-            "if",
-            "then",
-            "to",
-            "for",
-            "with",
-            "by",
-            "from",
-            "at",
-            "on",
-            "in",
-        }
-        keywords = [
-            token.lower()
-            for token in tokens
-            if len(token) > 1 and token.lower() not in stop_words
-        ]
-
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_keywords = []
-        for keyword in keywords:
-            if keyword not in seen:
-                seen.add(keyword)
-                unique_keywords.append(keyword)
-
-        return unique_keywords[:10]  # Limit to 10 keywords
-
+    @retry_llm_call
     def _extract_keywords_with_llm(
         self, query: str, op: OperationLogger | None = None
     ) -> list[str]:
@@ -927,9 +886,8 @@ class MemoryIngestion:
             prompt = self.keyword_extraction_prompt.format(query=query)
 
             # --- prompt logging: keyword extraction ---
-            keyword_op = op if op is not None else None
-            if keyword_op is not None:
-                keyword_op.attach_text("input_prompt.txt", prompt)
+            if op:
+                op.attach_text("input_prompt.txt", prompt)
 
             response = client.chat.completions.create(
                 model=self.config.experience_llm_model,
@@ -944,21 +902,26 @@ class MemoryIngestion:
             )
 
             result = response.choices[0].message.content
-            if result is None:
-                raise IngestionError("LLM returned empty response")
+            if not result or not result.strip():
+                raise IngestionError(
+                    "LLM returned an empty or whitespace-only response"
+                )
 
             result = result.strip()
             keywords = json.loads(result)
 
             # --- output logging: keyword extraction ---
-            if keyword_op is not None:
-                keyword_op.attach_text("model_output.json", result)
+            if op:
+                op.attach_text("model_output.json", result)
 
-            return keywords if isinstance(keywords, list) else []
+            return keywords
 
         except Exception as e:
-            # Fallback to jieba if LLM fails
-            self.logger.warning(f"LLM keyword extraction failed, using jieba: {e}")
+            # Fallback to jieba TF-IDF if LLM fails
+            self.logger.warning(
+                f"LLM keyword extraction failed, falling back to jieba TF-IDF. "
+                f"Content preview: '{query[:100]}...'. Error: {e}"
+            )
             return self._extract_keywords_with_jieba(query)
 
     def _distill_experience_with_llm(

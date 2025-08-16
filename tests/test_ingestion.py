@@ -157,9 +157,16 @@ class TestMemoryIngestion:
             metadata={"source": "manual", "keywords": "python,programming,language"},
             embedding=[0.1, 0.2, 0.3],
         )
-        ingestion.storage.add_fact.return_value = mock_stored_fact
+        ingestion.storage.add_fact.return_value = (mock_stored_fact, False)
         ingestion.storage.compute_fact_output_fp.return_value = "test_fp"
         ingestion.storage.fact_exists_by_output_fp.return_value = False
+        # Mock query_facts to return empty results (no similar facts found)
+        ingestion.storage.query_facts.return_value = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
 
         # Act - use the upsert_fact_with_policy method which is the current interface
         from gui_agent_memory.models import FactRecord
@@ -491,9 +498,16 @@ class TestMemoryIngestion:
             metadata={"source": "test"},
             embedding=[0.1] * 1024,
         )
-        ingestion.storage.add_fact.return_value = mock_stored_fact
+        ingestion.storage.add_fact.return_value = (mock_stored_fact, False)
         ingestion.storage.compute_fact_output_fp.return_value = "test_fp"
         ingestion.storage.fact_exists_by_output_fp.return_value = False
+        # Mock query_facts to return empty results (no similar facts found)
+        ingestion.storage.query_facts.return_value = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
 
         # Add facts in batch using the actual batch method
         results = ingestion.batch_add_facts(facts_data)
@@ -531,9 +545,16 @@ class TestMemoryIngestion:
             metadata={"source": "documentation"},
             embedding=[0.1] * 1024,
         )
-        ingestion.storage.add_fact.return_value = mock_stored_fact
+        ingestion.storage.add_fact.return_value = (mock_stored_fact, False)
         ingestion.storage.compute_fact_output_fp.return_value = "test_fp"
         ingestion.storage.fact_exists_by_output_fp.return_value = False
+        # Mock query_facts to return empty results (no similar facts found)
+        ingestion.storage.query_facts.return_value = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
 
         # Act - Use batch_add_facts which is available in the current interface
         result = ingestion.batch_add_facts(
@@ -573,9 +594,16 @@ class TestMemoryIngestion:
             metadata={"source": "test"},
             embedding=[0.1] * 1024,
         )
-        ingestion.storage.add_fact.return_value = mock_stored_fact
+        ingestion.storage.add_fact.return_value = (mock_stored_fact, False)
         ingestion.storage.compute_fact_output_fp.return_value = "test_fp"
         ingestion.storage.fact_exists_by_output_fp.return_value = False
+        # Mock query_facts to return empty results (no similar facts found)
+        ingestion.storage.query_facts.return_value = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
 
         # Act - Use batch_add_facts which is available in the current interface
         result = ingestion.batch_add_facts(
@@ -1043,6 +1071,13 @@ class TestMemoryIngestionAdvanced:
         ingestion.storage.add_fact.return_value = mock_stored_fact
         ingestion.storage.compute_fact_output_fp.return_value = "test_fp"
         ingestion.storage.fact_exists_by_output_fp.return_value = False
+        # Mock query_facts to return empty results (no similar facts found)
+        ingestion.storage.query_facts.return_value = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
 
         # Mock storage to raise an error on add operation
         ingestion.storage.add_fact.side_effect = StorageError("Storage failed")
@@ -1231,11 +1266,14 @@ class TestUpsertPolicy:
 
         storage = Mock()
         storage.add_facts.return_value = ["fact_id"]
-        storage.add_fact.return_value = StoredFact(
-            record_id="fact_id",
-            document="test content",
-            metadata={"source": "test"},
-            embedding=[0.1, 0.2, 0.3],
+        storage.add_fact.return_value = (
+            StoredFact(
+                record_id="fact_id",
+                document="test content",
+                metadata={"source": "test"},
+                embedding=[0.1, 0.2, 0.3],
+            ),
+            False,
         )
         storage.update_fact = Mock()
         return storage
@@ -1336,11 +1374,14 @@ class TestUpsertPolicy:
             "documents": ["old content"],
             "metadatas": [{"source": "s"}],
         }
-        ingestion.storage.add_fact.return_value = StoredFact(
-            record_id="new_id",
-            document="new content",
-            metadata={"source": "t"},
-            embedding=[0.3] * 4,
+        ingestion.storage.add_fact.return_value = (
+            StoredFact(
+                record_id="new_id",
+                document="new content",
+                metadata={"source": "t"},
+                embedding=[0.3] * 4,
+            ),
+            False,
         )
 
         with (

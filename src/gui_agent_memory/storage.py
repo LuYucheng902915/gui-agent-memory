@@ -178,15 +178,20 @@ class MemoryStorage:
 
     def _compute_fact_output_fp(self, fact: FactRecord) -> str:
         """Compute SHA-256 over normalized fact content only (robust to keyword variance)."""
-        payload = {
-            "fp_v": 1,
-            "type": "fact_output",
-            "content": self._normalize_text(fact.content),
-        }
-        data = json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        )
-        return hashlib.sha256(data.encode("utf-8")).hexdigest()
+        try:
+            payload = {
+                "fp_v": 1,
+                "type": "fact_output",
+                "content": self._normalize_text(fact.content),
+            }
+            data = json.dumps(
+                payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+            return hashlib.sha256(data.encode("utf-8")).hexdigest()
+        except Exception as e:
+            raise StorageError(
+                f"Failed to compute output fingerprint for fact: {e}"
+            ) from e
 
     def _compute_fact_input_fp(self, content: str, keywords: list[str] | None) -> str:
         """Compute input fingerprint for facts (same normalization strategy)."""
@@ -213,8 +218,7 @@ class MemoryStorage:
                 return bool(ids)
             return False
         except Exception as exc:
-            self.logger.warning("Fingerprint existence check failed: %s", exc)
-            return False
+            raise StorageError(f"Fingerprint existence check failed: {exc}") from exc
 
     # Public helpers for ingestion pre-checks
     def experience_exists_by_input_fp(self, fp_value: str) -> bool:
@@ -329,7 +333,11 @@ class MemoryStorage:
         return record_id, document, clean_metadata
 
     def _prepare_fact_record(
-        self, fact: FactRecord, index: int, output_fp: str | None = None
+        self,
+        fact: FactRecord,
+        index: int,
+        input_fp: str | None = None,
+        output_fp: str | None = None,
     ) -> tuple[str, str, dict[str, Any]]:
         """Convert a FactRecord into (id, document, metadata) preserving current ID scheme."""
         # Use UUIDv4 for robust, globally unique IDs
@@ -339,6 +347,8 @@ class MemoryStorage:
         # Attach fingerprints only when provided (avoid None values)
         if output_fp is not None:
             metadata["output_fp"] = output_fp
+        if input_fp is not None:
+            metadata["input_fp"] = input_fp
         clean_metadata = self._sanitize_metadata(metadata)
         return record_id, document, clean_metadata
 
@@ -488,11 +498,8 @@ class MemoryStorage:
                     continue
 
                 record_id, document, metadata = self._prepare_fact_record(
-                    fact, i, output_fp=out_fp
+                    fact, i, input_fp=in_fp, output_fp=out_fp
                 )
-                # Ensure input_fp presence for consistency in metadata
-                if in_fp:
-                    metadata["input_fp"] = in_fp
                 ids.append(record_id)
                 documents.append(document)
                 metadatas.append(metadata)
@@ -520,43 +527,36 @@ class MemoryStorage:
         *,
         input_fp: str | None = None,
         output_fp: str | None = None,
-    ) -> StoredFact:
-        """
-        Add a single fact record to the declarative memories collection.
-
-        This method performs no de-duplication or existence checks. The caller is
-        responsible for enforcing any idempotency or uniqueness policies.
-
-        Args:
-            fact: The fact record to add
-            embedding: The embedding vector corresponding to the fact content
-            input_fp: Optional input fingerprint to attach in metadata
-            output_fp: Optional output fingerprint to attach in metadata
+    ) -> tuple[StoredFact | None, bool]:
+        """Add a single fact with explicit duplicate status instead of exceptions.
 
         Returns:
-            StoredFact: The canonical persisted shape (id, document, metadata)
-
-        Raises:
-            StorageError: If storage operation fails
+            (stored_fact, db_hit):
+                - stored_fact: StoredFact if newly added; None if duplicate
+                - db_hit: True if duplicate detected at storage boundary
         """
         try:
+            if output_fp is None:
+                output_fp = self._compute_fact_output_fp(fact)
+            if self._exists_by_fp(self.declarative_collection, "output_fp", output_fp):
+                return None, True
             record_id, document, metadata = self._prepare_fact_record(
-                fact, index=0, output_fp=output_fp
+                fact, index=0, input_fp=input_fp, output_fp=output_fp
             )
-            if input_fp is not None:
-                metadata["input_fp"] = input_fp
-
             self.declarative_collection.add(
                 ids=[record_id],
                 documents=[document],
                 metadatas=[metadata],
                 embeddings=[embedding],
             )
-            return StoredFact(
-                record_id=record_id,
-                document=document,
-                metadata=metadata,
-                embedding=embedding,
+            return (
+                StoredFact(
+                    record_id=record_id,
+                    document=document,
+                    metadata=metadata,
+                    embedding=embedding,
+                ),
+                False,
             )
         except Exception as e:
             raise StorageError(f"Failed to add fact to ChromaDB: {e}") from e

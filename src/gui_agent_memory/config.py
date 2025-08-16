@@ -26,6 +26,8 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
+from .retry_utils import retry_llm_call
+
 # Provide a load_dotenv symbol for tests that patch it, without changing runtime behavior
 try:  # pragma: no cover - existence for patching compatibility
     from dotenv import load_dotenv as _real_load_dotenv
@@ -132,6 +134,14 @@ class MemoryConfig(BaseSettings):
     hybrid_topk_multiplier: int = Field(default=4, alias="HYBRID_TOPK_MULTIPLIER")
     http_timeout_seconds: int = Field(default=10, alias="HTTP_TIMEOUT_SECONDS")
 
+    # LLM retry policy (used by retry_llm_call decorator)
+    llm_retry_enabled: bool = Field(default=True, alias="LLM_RETRY_ENABLED")
+    llm_retry_attempts: int = Field(default=5, alias="LLM_RETRY_ATTEMPTS")
+    llm_retry_initial_seconds: float = Field(
+        default=2.0, alias="LLM_RETRY_INITIAL_SECONDS"
+    )
+    llm_retry_max_seconds: float = Field(default=30.0, alias="LLM_RETRY_MAX_SECONDS")
+
     # pydantic-settings configuration
     # Load variables from environment and automatically from a project-root .env file.
     # Priority (high -> low) follows pydantic-settings docs:
@@ -184,7 +194,6 @@ class MemoryConfig(BaseSettings):
 
         self._logger = logging.getLogger(__name__)
         # Nothing to normalize besides logs_base_dir
-        # Nothing to normalize besides logs_base_dir
 
         self._init_clients()
 
@@ -195,18 +204,21 @@ class MemoryConfig(BaseSettings):
             self._embedding_llm_client = OpenAI(
                 api_key=self.embedding_llm_api_key.get_secret_value(),
                 base_url=str(self.embedding_llm_base_url),
+                max_retries=0,
             )
 
             # Initialize reranker LLM client (OpenAI-compatible)
             self._reranker_llm_client = OpenAI(
                 api_key=self.reranker_llm_api_key.get_secret_value(),
                 base_url=str(self.reranker_llm_base_url),
+                max_retries=0,
             )
 
             # Initialize Experience LLM client (OpenAI-compatible)
             self._experience_llm_client = OpenAI(
                 api_key=self.experience_llm_api_key.get_secret_value(),
                 base_url=str(self.experience_llm_base_url),
+                max_retries=0,
             )
 
         except Exception as e:
@@ -232,6 +244,7 @@ class MemoryConfig(BaseSettings):
             raise ConfigurationError("Experience LLM client is not initialized")
         return self._experience_llm_client
 
+    @retry_llm_call
     def validate_configuration(self) -> bool:
         """
         Validate that all required configuration is present and clients are working.
@@ -345,6 +358,10 @@ class MemoryConfig(BaseSettings):
             "rerank_candidate_limit": self.rerank_candidate_limit,
             "hybrid_topk_multiplier": self.hybrid_topk_multiplier,
             "http_timeout_seconds": self.http_timeout_seconds,
+            "llm_retry_enabled": self.llm_retry_enabled,
+            "llm_retry_attempts": self.llm_retry_attempts,
+            "llm_retry_initial_seconds": self.llm_retry_initial_seconds,
+            "llm_retry_max_seconds": self.llm_retry_max_seconds,
             "dotenv_mode": dotenv_mode,
         }
 

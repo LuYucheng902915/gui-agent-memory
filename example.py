@@ -81,57 +81,55 @@ def demonstrate_fact_management(memory: MemorySystem):
     print_subsection("添加单个事实")
     try:
         resp = memory.add_fact(
-            content="VS Code是Microsoft开发的免费源代码编辑器，支持多种编程语言和扩展",
-            keywords=[],
+            content="Python是解释型高级编程语言，以简洁和可读性著称。",
+            keywords=["Python", "编程语言", "解释型", "高级语言"],
             source="demo_知识库" if False else "demo_knowledge_base",
         )
         if resp.success:
             print(f"✅ 成功添加事实: id={resp.record_id} result={resp.result}")
         else:
-            print(
-                f"ℹ️ 添加事实结果: result={resp.result} fingerprint_hit={resp.fingerprint_hit}"
-            )
+            print(f"ℹ️ 添加事实结果: result={resp.result} id={resp.record_id}")
     except Exception as e:
         print(f"❌ 添加事实失败: {e}")
 
     # 2. 批量添加事实
-    print_subsection("批量添加事实")
-    facts_data = [
-        {
-            "content": "Git是分布式版本控制系统，由厉害的Linus Torvalds创建",
-            "keywords": ["Git", "版本控制", "Linus Torvalds", "分布式"],
-            "source": "demo_knowledge_base",
-        },
-        {
-            "content": "Python是解释型高级编程语言，以简洁和可读性著称",
-            "keywords": ["Python", "编程语言", "解释型", "高级语言"],
-            "source": "demo_knowledge_base",
-        },
-        {
-            "content": "Docker是容器化平台，可以简化应用程序的部署和管理",
-            "keywords": ["Docker", "容器化", "部署", "应用管理"],
-            "source": "demo_knowledge_base",
-        },
-        {
-            "content": "React是Facebook开发的JavaScript库，用于构建用户界面",
-            "keywords": ["React", "Facebook", "JavaScript", "用户界面"],
-            "source": "demo_knowledge_base",
-        },
-    ]
+    # print_subsection("批量添加事实")
+    # facts_data = [
+    #     {
+    #         "content": "Git是分布式版本控制系统，由厉害的Linus Torvalds创建",
+    #         "keywords": ["Git", "版本控制", "Linus Torvalds", "分布式"],
+    #         "source": "demo_knowledge_base",
+    #     },
+    #     {
+    #         "content": "Python是解释型高级编程语言，以简洁和可读性著称",
+    #         "keywords": ["Python", "编程语言", "解释型", "高级语言"],
+    #         "source": "demo_knowledge_base",
+    #     },
+    #     {
+    #         "content": "Docker是容器化平台，可以简化应用程序的部署和管理",
+    #         "keywords": ["Docker", "容器化", "部署", "应用管理"],
+    #         "source": "demo_knowledge_base",
+    #     },
+    #     {
+    #         "content": "React是Facebook开发的JavaScript库，用于构建用户界面",
+    #         "keywords": ["React", "Facebook", "JavaScript", "用户界面"],
+    #         "source": "demo_knowledge_base",
+    #     },
+    # ]
 
-    try:
-        batch_results = memory.batch_add_facts(facts_data)
-        successes = [
-            r
-            for r in batch_results
-            if isinstance(r, str) and r.startswith("Successfully added fact")
-        ]
-        duplicates = len(batch_results) - len(successes)
-        print(f"✅ 批量处理完成: 新增 {len(successes)} 条, 去重 {duplicates} 条")
-        for i, res in enumerate(batch_results):
-            print(f"   {i + 1}. {res}")
-    except Exception as e:
-        print(f"❌ 批量添加事实失败: {e}")
+    # try:
+    #     batch_results = memory.batch_add_facts(facts_data)
+    #     successes = [
+    #         r
+    #         for r in batch_results
+    #         if isinstance(r, str) and r.startswith("Successfully added fact")
+    #     ]
+    #     duplicates = len(batch_results) - len(successes)
+    #     print(f"✅ 批量处理完成: 新增 {len(successes)} 条, 去重 {duplicates} 条")
+    #     for i, res in enumerate(batch_results):
+    #         print(f"   {i + 1}. {res}")
+    # except Exception as e:
+    #     print(f"❌ 批量添加事实失败: {e}")
 
     # 3. 检索相关事实
     print_subsection("检索相关事实")

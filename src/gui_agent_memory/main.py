@@ -343,10 +343,11 @@ class MemorySystem:
 
             # Map internal upsert result to public response
             response = self._map_upsert_to_response(upsert_result)
+            message = self._compose_fact_message(upsert_result.result)
 
             # Persist and return
             op.attach_json("result.json", response.model_dump())
-            op.attach_text("summary.txt", response.message)
+            op.attach_text("summary.txt", message)
             return response
         except IngestionError as e:
             # Unified error wrapping
@@ -380,19 +381,8 @@ class MemorySystem:
         return AddFactResponse(
             success=success,
             result=upsert.result,
-            message=message,
             record_id=upsert.new_record_id,
-            fingerprint_hit=True
-            if upsert.result == "discarded_by_fingerprint"
-            else (upsert.fingerprint_discarded or False),
-            judge_invoked=bool(upsert.invoked_judge)
-            if upsert.invoked_judge is not None
-            else None,
-            judge_decision=upsert.judge_decision,
-            similarity=upsert.similarity,
-            threshold=upsert.threshold,
-            log_dir=upsert.judge_log_dir,
-            details=upsert.details or {},
+            message=message,
         )
 
     def batch_add_facts(self, facts_data: list[dict[str, Any]]) -> list[str]:

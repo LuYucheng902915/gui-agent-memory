@@ -254,11 +254,22 @@ class TestConfigCoverage:
                 "models.list failed"
             )
 
-            mock_openai.side_effect = [
-                mock_embedding_client,
-                mock_reranker_client,
-                mock_experience_client,
-            ]
+            # Make the mock more flexible to handle multiple calls
+            def openai_side_effect(*args, **kwargs):
+                # Return the same clients for repeated calls
+                if mock_openai.call_count <= 3:
+                    # First three calls: embedding, reranker, experience
+                    clients = [
+                        mock_embedding_client,
+                        mock_reranker_client,
+                        mock_experience_client,
+                    ]
+                    return clients[(mock_openai.call_count - 1) % 3]
+                else:
+                    # Subsequent calls: return one of the existing clients
+                    return mock_embedding_client
+
+            mock_openai.side_effect = openai_side_effect
 
             # Mock successful HTTP response
             mock_response = Mock()
@@ -310,11 +321,22 @@ class TestConfigCoverage:
                 "models.list failed"
             )
 
-            mock_openai.side_effect = [
-                mock_embedding_client,
-                mock_reranker_client,
-                mock_experience_client,
-            ]
+            # Make the mock more flexible to handle multiple calls
+            def openai_side_effect(*args, **kwargs):
+                # Return the same clients for repeated calls
+                if mock_openai.call_count <= 3:
+                    # First three calls: embedding, reranker, experience
+                    clients = [
+                        mock_embedding_client,
+                        mock_reranker_client,
+                        mock_experience_client,
+                    ]
+                    return clients[(mock_openai.call_count - 1) % 3]
+                else:
+                    # Subsequent calls: return one of the existing clients
+                    return mock_embedding_client
+
+            mock_openai.side_effect = openai_side_effect
 
             # Mock HTTP response with 422 status (still valid)
             mock_response = Mock()

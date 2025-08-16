@@ -152,6 +152,11 @@ class UpsertResult(BaseModel):
     judge_decision: str | None = None
     judge_log_dir: str | None = None
     fingerprint_discarded: bool | None = None
+    # Where the similarity/decision signal comes from: fingerprint or vector
+    similarity_origin: Literal["fingerprint", "vector"] | None = None
+    # Hits (None = phase not executed)
+    pre_dedupe_hit: bool | None = None
+    db_hit: bool | None = None
     details: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {
@@ -175,15 +180,9 @@ class AddFactResponse(BaseModel):
         "kept_new_deleted_old",
         "kept_old_discarded_new",
     ]
-    message: str
     record_id: str | None = None
-    fingerprint_hit: bool | None = None
-    judge_invoked: bool | None = None
-    judge_decision: str | None = None
-    similarity: float | None = None
-    threshold: float | None = None
-    log_dir: str | None = None
-    details: dict[str, Any] = Field(default_factory=dict)
+    message: str
+    # Intentionally no fingerprint flags in external response (debug-only internally)
 
 
 class StoredFact(BaseModel):
