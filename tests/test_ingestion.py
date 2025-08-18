@@ -459,68 +459,7 @@ class TestMemoryIngestion:
         # Should not add to storage
         ingestion.storage.add_experiences.assert_not_called()
 
-    def test_batch_add_facts(self, ingestion, mock_config):
-        """Test batch addition of multiple facts."""
-        facts_data = [
-            {
-                "content": "Python is interpreted",
-                "keywords": ["python", "interpreted"],
-                "source": "doc1",
-            },
-            {
-                "content": "JavaScript runs in browsers",
-                "keywords": ["javascript", "browser"],
-                "source": "doc2",
-            },
-            {
-                "content": "SQL manages databases",
-                "keywords": ["sql", "database"],
-                "source": "doc3",
-            },
-        ]
-
-        # Set the threshold to a real number
-        mock_config.similarity_threshold_judge = 0.9
-
-        # Mock embedding generation for each fact
-        mock_embedding_response = Mock()
-        mock_embedding_response.data = [Mock(embedding=[0.1] * 1024)]
-        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
-            mock_embedding_response
-        )
-
-        # Mock the storage methods
-        from gui_agent_memory.models import StoredFact
-
-        mock_stored_fact = StoredFact(
-            record_id="fact_123",
-            document="test content",
-            metadata={"source": "test"},
-            embedding=[0.1] * 1024,
-        )
-        ingestion.storage.add_fact.return_value = (mock_stored_fact, False)
-        ingestion.storage.compute_fact_output_fp.return_value = "test_fp"
-        ingestion.storage.fact_exists_by_output_fp.return_value = False
-        # Mock query_facts to return empty results (no similar facts found)
-        ingestion.storage.query_facts.return_value = {
-            "ids": [[]],
-            "documents": [[]],
-            "metadatas": [[]],
-            "distances": [[]],
-        }
-
-        # Add facts in batch using the actual batch method
-        results = ingestion.batch_add_facts(facts_data)
-
-        # Verify all succeeded (new behavior: per-item upsert)
-        assert len(results) == 3
-        assert all(isinstance(result, str) for result in results)
-        assert all(
-            "Successfully added fact" in result or "discarded" in result
-            for result in results
-        )
-        # add_fact should be called for each item since we're using the new policy
-        assert ingestion.storage.add_fact.call_count == 3
+    # Removed: ingestion.batch_add_facts tests (migrated to main.batch_add_facts)
 
     def test_unicode_content_in_fact(self, ingestion, mock_config):
         """Test handling of Unicode content in facts."""
@@ -556,20 +495,7 @@ class TestMemoryIngestion:
             "distances": [[]],
         }
 
-        # Act - Use batch_add_facts which is available in the current interface
-        result = ingestion.batch_add_facts(
-            [
-                {
-                    "content": unicode_content,
-                    "keywords": ["python", "unicode", "字符串"],
-                    "source": "documentation",
-                }
-            ]
-        )
-
-        # Should handle Unicode content without issues
-        assert len(result) == 1
-        assert "Successfully added fact" in result[0] or "discarded" in result[0]
+        # Removed: ingestion.batch_add_facts unicode path; covered by single upsert tests
 
     def test_very_long_fact_content(self, ingestion, mock_config):
         """Test handling of very long fact content."""
@@ -605,35 +531,12 @@ class TestMemoryIngestion:
             "distances": [[]],
         }
 
-        # Act - Use batch_add_facts which is available in the current interface
-        result = ingestion.batch_add_facts(
-            [
-                {
-                    "content": long_content,
-                    "keywords": ["long", "content"],
-                    "source": "test",
-                }
-            ]
-        )
-
-        # Should handle long content
-        assert len(result) == 1
-        assert "Successfully added fact" in result[0] or "discarded" in result[0]
+        # Removed: batch path; long content handled by single upsert
 
     def test_empty_fact_content(self, ingestion):
         """Test handling of empty fact content."""
-        from gui_agent_memory.ingestion import IngestionError
 
-        with pytest.raises(IngestionError):
-            ingestion.batch_add_facts(
-                [
-                    {
-                        "content": "",  # Empty content
-                        "keywords": ["empty"],
-                        "source": "test",
-                    }
-                ]
-            )
+        # Removed: ingestion.batch_add_facts validation path
 
 
 class TestMemoryIngestionAdvanced:
@@ -978,114 +881,6 @@ class TestMemoryIngestionAdvanced:
             ingestion._generate_embedding("test content")
 
         assert "Failed to generate embedding" in str(exc_info.value)
-
-    def test_batch_add_facts_with_validation_errors(self, ingestion, mock_config):
-        """Test batch_add_facts with validation errors in some facts."""
-        from gui_agent_memory.ingestion import IngestionError
-
-        facts_data = [
-            {
-                "content": "Valid fact 1",
-                "keywords": ["valid", "fact1"],
-                "source": "test1",
-            },
-            {
-                "content": "",  # Invalid: empty content
-                "keywords": ["invalid"],
-                "source": "test2",
-            },
-            {
-                "content": "Valid fact 2",
-                "keywords": ["valid", "fact2"],
-                "source": "test3",
-            },
-        ]
-
-        # Should raise error for invalid facts
-        with pytest.raises(IngestionError) as exc_info:
-            ingestion.batch_add_facts(facts_data)
-
-        assert "Content cannot be empty" in str(exc_info.value)
-
-    def test_batch_add_facts_embedding_error(self, ingestion, mock_config):
-        """Test batch_add_facts when embedding generation fails."""
-        from gui_agent_memory.ingestion import IngestionError
-
-        facts_data = [
-            {
-                "content": "Valid fact",
-                "keywords": ["valid"],
-                "source": "test",
-            }
-        ]
-
-        # Set the threshold to a real number
-        mock_config.similarity_threshold_judge = 0.9
-
-        # Mock storage fingerprint methods to bypass fingerprint checks
-        ingestion.storage.compute_fact_output_fp.return_value = "test_fp"
-        ingestion.storage.fact_exists_by_output_fp.return_value = False
-
-        # Mock embedding client to raise an exception
-        mock_client = Mock()
-        mock_client.embeddings.create.side_effect = Exception("Embedding API Error")
-        mock_config.get_embedding_client.return_value = mock_client
-
-        with pytest.raises(IngestionError) as exc_info:
-            ingestion.batch_add_facts(facts_data)
-
-        assert "Failed to generate embedding" in str(exc_info.value)
-
-    def test_batch_add_facts_storage_error(self, ingestion, mock_config):
-        """Test batch_add_facts when storage operation fails."""
-        from gui_agent_memory.ingestion import IngestionError
-        from gui_agent_memory.storage import StorageError
-
-        facts_data = [
-            {
-                "content": "Valid fact",
-                "keywords": ["valid"],
-                "source": "test",
-            }
-        ]
-
-        # Set the threshold to a real number
-        mock_config.similarity_threshold_judge = 0.9
-
-        # Mock successful embedding generation
-        mock_embedding_response = Mock()
-        mock_embedding_response.data = [Mock(embedding=[0.1] * 1024)]
-        mock_config.get_embedding_client.return_value.embeddings.create.return_value = (
-            mock_embedding_response
-        )
-
-        # Mock the storage methods to avoid validation errors
-        from gui_agent_memory.models import StoredFact
-
-        mock_stored_fact = StoredFact(
-            record_id="fact_123",
-            document="Valid fact",
-            metadata={"source": "test"},
-            embedding=[0.1] * 1024,
-        )
-        ingestion.storage.add_fact.return_value = mock_stored_fact
-        ingestion.storage.compute_fact_output_fp.return_value = "test_fp"
-        ingestion.storage.fact_exists_by_output_fp.return_value = False
-        # Mock query_facts to return empty results (no similar facts found)
-        ingestion.storage.query_facts.return_value = {
-            "ids": [[]],
-            "documents": [[]],
-            "metadatas": [[]],
-            "distances": [[]],
-        }
-
-        # Mock storage to raise an error on add operation
-        ingestion.storage.add_fact.side_effect = StorageError("Storage failed")
-
-        with pytest.raises(IngestionError) as exc_info:
-            ingestion.batch_add_facts(facts_data)
-
-        assert "Failed to add facts to storage" in str(exc_info.value)
 
 
 class TestIngestionCoverage:
@@ -1440,7 +1235,8 @@ class TestUpsertPolicy:
     def test_judge_update_existing_invalid_payload_fallback_add_new(
         self, ingestion, mock_config
     ):
-        """Invalid updated_record should fallback to add_new path without crashing."""
+        """Invalid updated_record should raise IngestionError."""
+        from gui_agent_memory.ingestion import IngestionError
         from gui_agent_memory.models import FactRecord
 
         mock_config.similarity_threshold_judge = 0.5
@@ -1463,12 +1259,16 @@ class TestUpsertPolicy:
                 return_value={"decision": "update_existing", "updated_record": {}},
             ),
         ):
-            dbg = ingestion.upsert_fact_with_policy(
-                FactRecord(content="new", keywords=["k"], source="t")
+            with pytest.raises(IngestionError) as exc_info:
+                ingestion.upsert_fact_with_policy(
+                    FactRecord(content="new", keywords=["k"], source="t")
+                )
+
+            assert "Judge provided invalid updated_record payload" in str(
+                exc_info.value
             )
 
-        assert dbg.result == "added_new"
-        ingestion.storage.add_facts.assert_called()
+        ingestion.storage.add_facts.assert_not_called()
 
     def test_judge_update_existing(self, ingestion, mock_config):
         """Judge decides update_existing → call storage.update_fact with new embedding."""

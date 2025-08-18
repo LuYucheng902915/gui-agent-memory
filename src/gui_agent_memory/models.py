@@ -6,6 +6,7 @@ This module defines the core data structures for both types of memories:
 - FactRecord: For storing semantic knowledge (declarative memory)
 """
 
+import re
 from datetime import datetime
 from typing import Any, Literal
 
@@ -199,3 +200,31 @@ class StoredFact(BaseModel):
     embedding: list[float] = Field(
         default_factory=list, description="Embedding vector stored alongside the record"
     )
+
+
+def sanitize_fact_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Return a cleaned payload that only contains fields defined by FactRecord.
+
+    - Keeps only: content, keywords, source, usage_count, last_used_at
+    - Normalizes keywords: accepts str like "a,b,c" or list; returns list[str]
+    """
+    allowed_keys = {"content", "keywords", "source", "usage_count", "last_used_at"}
+    cleaned: dict[str, Any] = {k: payload[k] for k in allowed_keys if k in payload}
+
+    keywords = cleaned.get("keywords")
+    if isinstance(keywords, str):
+        cleaned["keywords"] = [
+            token.strip()
+            for token in re.split(r"[，,;|\s]+", keywords)
+            if token.strip()
+        ]
+    elif isinstance(keywords, list):
+        cleaned["keywords"] = [
+            str(token).strip() for token in keywords if str(token).strip()
+        ]
+    elif "keywords" in cleaned:
+        # Present but not a supported type -> coerce to empty list
+        cleaned["keywords"] = []
+
+    return cleaned

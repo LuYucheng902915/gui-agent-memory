@@ -28,6 +28,7 @@ from .models import (
     FactRecord,
     LearningRequest,
     UpsertResult,
+    sanitize_fact_payload,
 )
 from .retry_utils import retry_llm_call
 from .storage import MemoryStorage
@@ -147,15 +148,6 @@ class MemoryIngestion:
         if isinstance(keywords, list) and len(keywords) > 0:
             return keywords
 
-        self._append_dead_letter(
-            category="keyword_extraction",
-            payload={
-                "timestamp": datetime.now().isoformat(),
-                "reason": "keyword_extraction_failed",
-                "content_preview": (fact.content or "")[:200],
-                "fact": fact.model_dump(),
-            },
-        )
         raise IngestionError(
             "Keyword extraction failed; record sent to dead-letter queue"
         )
@@ -694,24 +686,29 @@ class MemoryIngestion:
             if decision == "update_existing":
                 updated_payload = judge.get("updated_record") or {}
                 try:
-                    updated = FactRecord(**updated_payload)
+                    cleaned = sanitize_fact_payload(updated_payload)
+                    updated = FactRecord(**cleaned)
                 except Exception as e:
-                    self.logger.warning(
-                        f"Invalid updated_record from judge, fallback add_new: {e}"
-                    )
-                    self.storage.add_facts([fact], [embedding], output_fps=[out_fp])
-                    return UpsertResult(
-                        **{
-                            "result": "added_new",
-                            "similarity": sim,
-                            "threshold": threshold,
-                            "invoked_judge": True,
-                            "judge_decision": "add_new",
-                            "top_id": top_id,
-                            "fingerprint_discarded": False,
-                            "judge_log_dir": judge.get("log_dir"),
-                        }
-                    )
+                    # Dead letter for malformed updated payload, then fail fast
+                    try:
+                        self._append_dead_letter(
+                            category="judge_update_invalid",
+                            payload={
+                                "timestamp": datetime.now().isoformat(),
+                                "reason": f"invalid_updated_record: {e}",
+                                "stage": "update_existing",
+                                "data": updated_payload,
+                                "top_id": top_id,
+                                "extras": {"judge": judge},
+                            },
+                        )
+                    except Exception as exc:
+                        self.logger.debug(
+                            "DLQ append failed (judge_update_invalid): %s", exc
+                        )
+                    raise IngestionError(
+                        "Judge provided invalid updated_record payload"
+                    ) from e
                 upd_emb = self._generate_embedding(updated.content)
                 self.storage.update_fact(top_id, updated, embedding=upd_emb)
                 dbg = self._make_upsert_payload(
@@ -1256,61 +1253,3 @@ class MemoryIngestion:
 
         except Exception as e:
             raise IngestionError(f"Failed to add experience: {e}") from e
-
-    def batch_add_facts(
-        self, facts_data: list[dict[str, Any]], op: OperationLogger | None = None
-    ) -> list[str]:
-        """
-        Add multiple facts in batch.
-
-        Args:
-            facts_data: List of dictionaries containing fact data
-
-        Returns:
-            List of success messages
-
-        Raises:
-            IngestionError: If batch operation fails
-        """
-        try:
-            # Validate all facts first
-            for i, fact_data in enumerate(facts_data):
-                if not fact_data.get("content", "").strip():
-                    raise IngestionError(
-                        f"Content cannot be empty for fact at index {i}"
-                    )
-
-            # Operation logger for batch (ingestion scope)
-            if op is None:
-                op = OperationLogger.create(
-                    self.config.logs_base_dir,
-                    "batch_add_facts",
-                    enabled=self.config.operation_logs_enabled,
-                )
-            ing_op = op.child("ingestion")
-            ing_op.attach_json("input.json", facts_data)
-
-            # Simple batch: route each item through upsert policy with per-item child op
-            success_msgs: list[str] = []
-            for idx, fact_data in enumerate(facts_data, start=1):
-                item_op = ing_op.child(f"item_{idx:03d}")
-                fact = FactRecord(
-                    content=fact_data["content"],
-                    keywords=fact_data.get("keywords", []),
-                    source=fact_data.get("source", "batch_import"),
-                )
-                dbg = self.upsert_fact_with_policy(fact, op=item_op)
-                msg = self._compose_fact_message(dbg.result)
-                # Mirror per-item message for quick glance
-                item_op.attach_text("result.txt", msg)
-                success_msgs.append(msg)
-            ing_op.attach_json(
-                "summary.json", {"added": len(success_msgs), "total": len(facts_data)}
-            )
-            return success_msgs
-
-        except Exception as e:
-            # Handle storage-specific errors with more specific messages
-            if "storage" in str(e).lower() or "StorageError" in str(type(e).__name__):
-                raise IngestionError(f"Failed to add facts to storage: {e}") from e
-            raise IngestionError(f"Failed to batch add facts: {e}") from e

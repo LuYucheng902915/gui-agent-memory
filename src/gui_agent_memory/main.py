@@ -341,6 +341,8 @@ class MemorySystem:
             fact = FactRecord(content=content, keywords=keywords, source=source)
             upsert_result = self.ingestion.upsert_fact_with_policy(fact, op=op)
 
+            # 仅在最终异常场景写 DLQ；正常返回则不写（即使指纹命中也认为不需保存）
+
             # Map internal upsert result to public response
             response = self._map_upsert_to_response(upsert_result)
             message = self._compose_fact_message(upsert_result.result)
@@ -349,11 +351,11 @@ class MemorySystem:
             op.attach_json("result.json", response.model_dump())
             op.attach_text("summary.txt", message)
             return response
-        except IngestionError as e:
-            # Unified error wrapping
-            raise MemorySystemError(f"Adding fact failed: {e}") from e
         except Exception as e:
-            # Catch-all for unexpected errors
+            # 在最终异常时统一写入 DLQ（仅 content/keywords），再抛到外层
+            self._write_dead_letter_fact(content, keywords)
+            if isinstance(e, IngestionError):
+                raise MemorySystemError(f"Adding fact failed: {e}") from e
             raise MemorySystemError(
                 f"An unexpected error occurred while adding fact: {e}"
             ) from e
@@ -384,6 +386,25 @@ class MemorySystem:
             record_id=upsert.new_record_id,
             message=message,
         )
+
+    def _write_dead_letter_fact(self, content: str, keywords: list[str]) -> None:
+        """
+        Append a minimal dead-letter record for facts that were not written to DB.
+        Only content and keywords are persisted (one JSON per line).
+        """
+        import json
+        from pathlib import Path
+
+        base = Path(self.config.logs_base_dir) / "dead_letter"
+        base.mkdir(parents=True, exist_ok=True)
+        path = base / "fact_not_written.jsonl"
+        line = json.dumps(
+            {"content": content, "keywords": keywords}, ensure_ascii=False
+        )
+        if not path.exists():
+            path.write_text("", encoding="utf-8")
+        with path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
 
     def batch_add_facts(self, facts_data: list[dict[str, Any]]) -> list[str]:
         """
@@ -436,10 +457,43 @@ class MemorySystem:
                 enabled=self.config.operation_logs_enabled,
             )
             op.attach_json("input.json", facts_data)
-            result = self.ingestion.batch_add_facts(facts_data, op=op)
-            op.attach_json("result.json", result)
-            op.attach_json("summary.json", {"count": len(result)})
-            return result
+
+            messages: list[str] = []
+            for idx, item in enumerate(facts_data, start=1):
+                item_op = op.child(f"item_{idx:03d}")
+                # Normalize fields
+                item_content = (item.get("content") or "").strip()
+                item_keywords = item.get("keywords") or []
+                item_source = item.get("source", "batch_import")
+                item_op.attach_json(
+                    "input.json",
+                    {
+                        "content": item_content,
+                        "keywords": item_keywords,
+                        "source": item_source,
+                    },
+                )
+
+                try:
+                    fact = FactRecord(
+                        content=item_content, keywords=item_keywords, source=item_source
+                    )
+                    upsert = self.ingestion.upsert_fact_with_policy(fact, op=item_op)
+                    response = self._map_upsert_to_response(upsert)
+                    message = self._compose_fact_message(upsert.result)
+                    item_op.attach_json("result.json", response.model_dump())
+                    item_op.attach_text("summary.txt", message)
+                    messages.append(message)
+                except Exception as e:
+                    # Final failure for this item → write DLQ and re-raise to fail batch
+                    self._write_dead_letter_fact(item_content, item_keywords)
+                    raise MemorySystemError(
+                        f"Batch add failed at index {idx}: {e}"
+                    ) from e
+
+            op.attach_json("result.json", messages)
+            op.attach_json("summary.json", {"count": len(messages)})
+            return messages
         except IngestionError as e:
             raise MemorySystemError(f"Batch adding facts failed: {e}") from e
         except Exception as e:
