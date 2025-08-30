@@ -23,14 +23,14 @@ repos:
     hooks:
       - id: mypy
         additional_dependencies: [
-          types-requests>=2.32.4.20250611,
+          types-requests==2.32.4.20250611,
         ]
 
   - repo: local
     hooks:
       - id: pytest
         name: pytest (run tests before push)
-        entry: pytest -q
+        entry: uv run pytest -q
         language: system
         pass_filenames: false
         stages: [pre-push]
